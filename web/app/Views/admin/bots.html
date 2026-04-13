@@ -1,0 +1,112 @@
+<include href="admin/layout.html" />
+
+<h2>Bots</h2>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Token</th>
+                <th>Users</th>
+                <th>Webapp URL</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <repeat group="{{ @bots }}" value="{{ @bot }}">
+                <tr>
+                    <td>{{ @bot.id }}</td>
+                    <td><strong>{{ @bot.name }}</strong></td>
+                    <td>
+                        <code style="font-size:12px;color:#888;">{{ substr(@bot.token,0,8) }}...{{ substr(@bot.token,-6) }}</code>
+                    </td>
+                    <td><span class="badge badge-info">{{ @bot.user_count }}</span></td>
+                    <td style="font-size:12px;color:#888;">{{ @bot.webapp_url }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary" onclick="editBot({{ @bot.id }})">Edit</button>
+                        <a href="/admin/translations?bot_id={{ @bot.id }}" class="btn btn-sm btn-primary">Translations</a>
+                    </td>
+                </tr>
+            </repeat>
+        </tbody>
+    </table>
+</div>
+
+<div class="card" id="bot-form-card">
+    <h3 id="form-title" style="margin-bottom:16px;font-size:16px;">Add New Bot</h3>
+    <form method="POST" action="/admin/bots">
+        <input type="hidden" name="csrf_token" value="{{ @csrf_token }}">
+        <input type="hidden" name="id" id="bot-id" value="">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Name *</label>
+                <input type="text" name="name" id="bot-name" required style="width:100%;">
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Token *</label>
+                <input type="text" name="token" id="bot-token" required style="width:100%;">
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Webapp URL</label>
+                <input type="text" name="webapp_url" id="bot-webapp-url" style="width:100%;" placeholder="https://domain.com/app/1/">
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Linked Channel</label>
+                <input type="text" name="linked_channel" id="bot-linked-channel" style="width:100%;" placeholder="@channel or -100...">
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Support Link</label>
+                <input type="text" name="support_link" id="bot-support-link" style="width:100%;" placeholder="https://t.me/support">
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Referral URL Template</label>
+                <input type="text" name="referral_url_template" id="bot-referral-url" style="width:100%;" placeholder="https://...?uid={user_id}">
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Postback Secret</label>
+                <input type="text" name="postback_secret" id="bot-postback-secret" style="width:100%;">
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save Bot</button>
+        <button type="button" class="btn btn-secondary" onclick="resetForm()">Cancel</button>
+    </form>
+</div>
+
+<script>
+    var botsData = {~ echo \Base::instance()->get('bots_json'); ~};
+
+    function editBot(id) {
+        var bot = botsData.find(function(b) { return b.id == id; });
+        if (!bot) return;
+
+        document.getElementById('form-title').textContent = 'Edit Bot #' + id;
+        document.getElementById('bot-id').value = bot.id;
+        document.getElementById('bot-name').value = bot.name || '';
+        document.getElementById('bot-token').value = bot.token || '';
+        document.getElementById('bot-webapp-url').value = bot.webapp_url || '';
+        document.getElementById('bot-linked-channel').value = bot.linked_channel || '';
+        document.getElementById('bot-support-link').value = bot.support_link || '';
+        document.getElementById('bot-referral-url').value = bot.referral_url_template || '';
+        document.getElementById('bot-postback-secret').value = bot.postback_secret || '';
+
+        document.getElementById('bot-form-card').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function resetForm() {
+        document.getElementById('form-title').textContent = 'Add New Bot';
+        document.getElementById('bot-id').value = '';
+        document.getElementById('bot-name').value = '';
+        document.getElementById('bot-token').value = '';
+        document.getElementById('bot-webapp-url').value = '';
+        document.getElementById('bot-linked-channel').value = '';
+        document.getElementById('bot-support-link').value = '';
+        document.getElementById('bot-referral-url').value = '';
+        document.getElementById('bot-postback-secret').value = '';
+    }
+</script>
+
+<include href="admin/layout_close.html" />

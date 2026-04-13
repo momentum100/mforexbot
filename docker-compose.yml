@@ -1,0 +1,53 @@
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    ports:
+      - "8110:80"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web:/var/www/html
+      - ./webapp:/var/www/html/webapp
+    depends_on:
+      - php-fpm
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  php-fpm:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    volumes:
+      - ./web:/var/www/html
+      - ./webapp:/var/www/html/webapp
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_NAME: ${DB_NAME}
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: ./docker/bot
+      dockerfile: Dockerfile
+    volumes:
+      - ./bot:/app
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_NAME: ${DB_NAME}
+    command: python main.py --bot-id=1
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge

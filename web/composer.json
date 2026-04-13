@@ -1,0 +1,14 @@
+{
+    "name": "mforexbot/web",
+    "description": "M-Bot-Forex Web Application - Admin Panel & Telegram Mini Web App API",
+    "type": "project",
+    "require": {
+        "php": ">=8.4",
+        "bcosca/fatfree": "^3.9"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Analyzing Trading</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1923;
+            color: #fff;
+            min-height: 100vh;
+            padding: 16px;
+        }
+        .container { max-width: 400px; margin: 0 auto; }
+        h1 { font-size: 20px; text-align: center; margin-bottom: 8px; }
+        .subtitle { color: #8b9bab; text-align: center; font-size: 14px; margin-bottom: 24px; }
+        .debug { background: #1a2733; border-radius: 8px; padding: 16px; margin-top: 24px; }
+        .debug h2 { font-size: 14px; color: #8b9bab; margin-bottom: 8px; }
+        pre { font-size: 12px; color: #4fc3f7; white-space: pre-wrap; word-break: break-all; }
+        .status { text-align: center; padding: 12px; background: #1a2733; border-radius: 8px; color: #4caf50; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analyzing Trading</h1>
+        <p class="subtitle">Telegram Mini Web App</p>
+        <div class="status" id="status">Connecting...</div>
+        <div class="debug">
+            <h2>Telegram Data</h2>
+            <pre id="data">Loading...</pre>
+        </div>
+    </div>
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        const statusEl = document.getElementById('status');
+        const dataEl = document.getElementById('data');
+
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            statusEl.textContent = 'Connected as ' + (tg.initDataUnsafe.user.first_name || 'Unknown');
+            statusEl.style.color = '#4caf50';
+        } else {
+            statusEl.textContent = 'Open from Telegram to see user data';
+            statusEl.style.color = '#ff9800';
+        }
+
+        dataEl.textContent = JSON.stringify(tg.initDataUnsafe, null, 2);
+    </script>
+</body>
+</html>

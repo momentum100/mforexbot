@@ -1,0 +1,231 @@
+<include href="admin/layout.html" />
+
+<h2>Translations</h2>
+
+<!-- Filters -->
+<div class="card">
+    <form method="GET" action="/admin/translations" class="form-inline">
+        <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Bot</label>
+            <select name="bot_id" id="bot-selector" style="min-width:180px;">
+                <option value="base" {{ @current_bot_id=='base' || !@current_bot_id ? 'selected' : '' }}>Base / Default</option>
+                <repeat group="{{ @bots }}" value="{{ @bot }}">
+                    <option value="{{ @bot.id }}" {{ @bot.id==@current_bot_id ? 'selected' : '' }}>{{ @bot.name }} (#{{ @bot.id }})</option>
+                </repeat>
+            </select>
+        </div>
+
+        <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Language</label>
+            <select name="lang" id="lang-selector" style="min-width:140px;">
+                <repeat group="{{ @languages }}" value="{{ @lng }}">
+                    <option value="{{ @lng.code }}" {{ @lng.code==@current_lang ? 'selected' : '' }}>{{ @lng.flag }} {{ @lng.name }}</option>
+                </repeat>
+            </select>
+        </div>
+
+        <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Search Key</label>
+            <input type="text" name="search" value="{{ @search }}" placeholder="Filter by key..." style="min-width:200px;">
+        </div>
+
+        <div style="align-self:flex-end;">
+            <button type="submit" class="btn btn-primary">Filter</button>
+        </div>
+    </form>
+</div>
+
+<!-- Language tabs (quick switch) -->
+<div style="margin-bottom:16px;display:flex;gap:4px;flex-wrap:wrap;">
+    <repeat group="{{ @languages }}" value="{{ @lng }}">
+        <a href="/admin/translations?bot_id={{ @current_bot_id }}&lang={{ @lng.code }}&search={{ urlencode(@search) }}"
+           class="btn btn-sm {{ @lng.code==@current_lang ? 'btn-primary' : 'btn-secondary' }}">
+            {{ @lng.flag }} {{ strtoupper(@lng.code) }}
+        </a>
+    </repeat>
+</div>
+
+<!-- Translations table -->
+<div class="card" style="overflow-x:auto;">
+    <table id="translations-table">
+        <thead>
+            <tr>
+                <th style="width:30%;">Key</th>
+                <th style="width:30%;">Base Value</th>
+                <check if="{{ @current_bot_id && @current_bot_id!='base' }}">
+                    <th style="width:30%;">Bot Override</th>
+                    <th style="width:10%;">Actions</th>
+                </check>
+                <check if="{{ !@current_bot_id || @current_bot_id=='base' }}">
+                    <th style="width:10%;">Actions</th>
+                </check>
+            </tr>
+        </thead>
+        <tbody>
+            <repeat group="{{ @translations }}" value="{{ @t }}">
+                <tr data-key="{{ @t.key }}">
+                    <td>
+                        <code style="font-size:13px;">{{ @t.key }}</code>
+                    </td>
+                    <td class="base-cell" style="{{ @t.is_missing_base ? 'background:#fff3cd;' : '' }}">
+                        <check if="{{ @current_bot_id && @current_bot_id!='base' }}">
+                            <span style="color:#888;font-size:13px;">{{ @t.base_value }}</span>
+                        </check>
+                        <check if="{{ !@current_bot_id || @current_bot_id=='base' }}">
+                            <span class="edit-value" data-key="{{ @t.key }}" data-field="base">{{ @t.base_value }}</span>
+                        </check>
+                    </td>
+                    <check if="{{ @current_bot_id && @current_bot_id!='base' }}">
+                        <td class="override-cell">
+                            <span class="edit-value" data-key="{{ @t.key }}" data-field="override"
+                                  style="{{ @t.has_override ? 'font-weight:600;' : 'color:#aaa;font-style:italic;' }}">{{ @t.has_override ? @t.override_value : '(using base)' }}</span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary edit-btn" data-key="{{ @t.key }}">Edit</button>
+                            <check if="{{ @t.has_override }}">
+                                <button class="btn btn-sm btn-danger reset-btn" data-key="{{ @t.key }}">Reset</button>
+                            </check>
+                        </td>
+                    </check>
+                    <check if="{{ !@current_bot_id || @current_bot_id=='base' }}">
+                        <td>
+                            <button class="btn btn-sm btn-secondary edit-btn" data-key="{{ @t.key }}">Edit</button>
+                        </td>
+                    </check>
+                </tr>
+            </repeat>
+        </tbody>
+    </table>
+
+    <check if="{{ !@translations || empty(@translations) }}">
+        <p style="text-align:center;color:#888;padding:24px;">No translations found.</p>
+    </check>
+</div>
+
+<!-- Inline edit modal -->
+<div id="edit-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:8px;padding:24px;width:90%;max-width:500px;box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+        <h3 id="modal-title" style="margin-bottom:16px;font-size:16px;">Edit Translation</h3>
+        <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Key</label>
+            <input type="text" id="modal-key" readonly style="width:100%;background:#f5f5f5;">
+        </div>
+        <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Value</label>
+            <textarea id="modal-value" rows="4" style="width:100%;resize:vertical;"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveModal()">Save</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    var csrfToken = '{{ @csrf_token }}';
+    var currentBotId = '{{ @current_bot_id }}';
+    var currentLang = '{{ @current_lang }}';
+
+    // Auto-submit on bot/lang change
+    document.getElementById('bot-selector').addEventListener('change', function() {
+        this.form.submit();
+    });
+    document.getElementById('lang-selector').addEventListener('change', function() {
+        this.form.submit();
+    });
+
+    // Edit buttons
+    document.querySelectorAll('.edit-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var key = this.getAttribute('data-key');
+            var row = document.querySelector('tr[data-key="' + key + '"]');
+
+            var valueSpan;
+            if (currentBotId && currentBotId !== 'base') {
+                valueSpan = row.querySelector('.override-cell .edit-value');
+            } else {
+                valueSpan = row.querySelector('.base-cell .edit-value');
+            }
+
+            var currentValue = valueSpan ? valueSpan.textContent : '';
+            if (currentValue === '(using base)') currentValue = '';
+
+            document.getElementById('modal-key').value = key;
+            document.getElementById('modal-value').value = currentValue;
+            document.getElementById('modal-title').textContent = 'Edit: ' + key;
+            document.getElementById('edit-modal').style.display = 'flex';
+            document.getElementById('modal-value').focus();
+        });
+    });
+
+    // Reset buttons
+    document.querySelectorAll('.reset-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var key = this.getAttribute('data-key');
+            if (!confirm('Reset override for "' + key + '" to base value?')) return;
+
+            var formData = new FormData();
+            formData.append('csrf_token', csrfToken);
+            formData.append('bot_id', currentBotId);
+            formData.append('key', key);
+            formData.append('lang_code', currentLang);
+
+            fetch('/admin/translations/delete', {
+                method: 'POST',
+                body: formData
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            });
+        });
+    });
+
+    function closeModal() {
+        document.getElementById('edit-modal').style.display = 'none';
+    }
+
+    function saveModal() {
+        var key = document.getElementById('modal-key').value;
+        var value = document.getElementById('modal-value').value;
+
+        var botId = currentBotId || 'base';
+
+        var formData = new FormData();
+        formData.append('csrf_token', csrfToken);
+        formData.append('bot_id', botId);
+        formData.append('key', key);
+        formData.append('lang_code', currentLang);
+        formData.append('value', value);
+
+        fetch('/admin/translations/save', {
+            method: 'POST',
+            body: formData
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                closeModal();
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        });
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('edit-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeModal();
+    });
+</script>
+
+<include href="admin/layout_close.html" />
