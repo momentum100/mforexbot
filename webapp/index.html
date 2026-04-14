@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Analyzing Trading</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -12,44 +12,387 @@
             background: #0f1923;
             color: #fff;
             min-height: 100vh;
-            padding: 16px;
         }
-        .container { max-width: 400px; margin: 0 auto; }
-        h1 { font-size: 20px; text-align: center; margin-bottom: 8px; }
-        .subtitle { color: #8b9bab; text-align: center; font-size: 14px; margin-bottom: 24px; }
-        .debug { background: #1a2733; border-radius: 8px; padding: 16px; margin-top: 24px; }
-        .debug h2 { font-size: 14px; color: #8b9bab; margin-bottom: 8px; }
-        pre { font-size: 12px; color: #4fc3f7; white-space: pre-wrap; word-break: break-all; }
-        .status { text-align: center; padding: 12px; background: #1a2733; border-radius: 8px; color: #4caf50; font-weight: bold; }
+        .container { max-width: 420px; margin: 0 auto; padding: 16px; }
+
+        .header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .header-text { flex: 1; }
+        .header-text h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+        .header-text .subtitle { font-size: 13px; color: #8b9bab; }
+        .lang-selector select {
+            background: #1a2733; color: #fff; border: 1px solid #2a3744;
+            border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+        }
+
+        .tabs { display: flex; background: #1a2733; border-radius: 8px; padding: 3px; margin-bottom: 20px; }
+        .tab {
+            flex: 1; text-align: center; padding: 10px; border-radius: 6px;
+            font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #8b9bab;
+        }
+        .tab.active { background: #4a6cf7; color: #fff; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-group label {
+            display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.5px; color: #8b9bab; margin-bottom: 8px;
+        }
+
+        .pair-select {
+            width: 100%; background: #1a2733; color: #fff; border: 1px solid #2a3744;
+            border-radius: 8px; padding: 12px; font-size: 15px; cursor: pointer;
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b9bab' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 12px center;
+        }
+
+        .expiration-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .expiration-grid .exp-btn:last-child:nth-child(odd) {
+            grid-column: 1 / -1; max-width: 50%; justify-self: center; width: 100%;
+        }
+        .exp-btn {
+            background: #1a2733; border: 1px solid #2a3744; color: #8b9bab;
+            border-radius: 8px; padding: 10px; font-size: 14px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s; text-align: center;
+        }
+        .exp-btn.active { background: #4a6cf7; border-color: #4a6cf7; color: #fff; }
+
+        .generate-btn {
+            width: 100%; padding: 14px; border: none; border-radius: 8px;
+            font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 20px;
+            background: linear-gradient(135deg, #4a6cf7, #2dd4bf); color: #fff;
+            transition: opacity 0.2s;
+        }
+        .generate-btn:hover { opacity: 0.9; }
+        .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .signal-result {
+            margin-top: 20px; background: #1a2733; border-radius: 12px;
+            max-height: 0; overflow: hidden; opacity: 0;
+            transition: max-height 0.5s ease-out, opacity 0.4s ease-out, padding 0.5s ease-out;
+            padding: 0 20px;
+        }
+        .signal-result.visible {
+            max-height: 400px; opacity: 1; padding: 20px;
+        }
+        .signal-result h3 { font-size: 16px; margin-bottom: 6px; text-align: center; }
+        .signal-expiration-badge { text-align: center; color: #8b9bab; font-size: 13px; margin-bottom: 14px; }
+        .signal-card {
+            background: #0f1923; border-radius: 8px; padding: 14px; margin-bottom: 10px; text-align: center;
+        }
+        .signal-card .signal-label {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #8b9bab; margin-bottom: 6px;
+        }
+        .signal-card .signal-value { font-size: 20px; font-weight: 700; }
+        .signal-timestamp { text-align: center; color: #8b9bab; font-size: 12px; margin-top: 10px; }
+        .signal-buy { color: #22c55e; }
+        .signal-sell { color: #ef4444; }
+        .confidence-low { color: #f97316; }
+        .confidence-medium { color: #eab308; }
+        .confidence-high { color: #22c55e; }
+
+        .chart-section {
+            margin-top: 20px; background: #1a2733; border-radius: 12px;
+            display: none; overflow: hidden;
+        }
+        .chart-section.visible { display: block; }
+        .chart-container { width: 100%; min-height: 500px; border-radius: 8px; overflow: hidden; }
+        .chart-container iframe { width: 100% !important; height: 500px !important; }
+
+        .spinner {
+            display: inline-block; width: 18px; height: 18px;
+            border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+            border-radius: 50%; animation: spin 0.6s linear infinite;
+            vertical-align: middle; margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Analyzing Trading</h1>
-        <p class="subtitle">Telegram Mini Web App</p>
-        <div class="status" id="status">Connecting...</div>
-        <div class="debug">
-            <h2>Telegram Data</h2>
-            <pre id="data">Loading...</pre>
+        <div class="header-row">
+            <div class="header-text">
+                <h1 id="title">Trading Signals</h1>
+                <p class="subtitle" id="subtitle">Professional signals for binary options</p>
+            </div>
+            <select id="lang-select"></select>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-type="forex" id="tab-forex">Forex</div>
+            <div class="tab" data-type="otc" id="tab-otc">OTC</div>
+        </div>
+
+        <div class="form-group">
+            <label id="label-pair">CURRENCY PAIR</label>
+            <select class="pair-select" id="pair-select">
+                <option value="">Loading...</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label id="label-expiration">EXPIRATION TIME</label>
+            <div class="expiration-grid" id="exp-grid">
+                <button class="exp-btn active" data-exp="1m">1m</button>
+                <button class="exp-btn" data-exp="3m">3m</button>
+                <button class="exp-btn" data-exp="5m">5m</button>
+                <button class="exp-btn" data-exp="15m">15m</button>
+                <button class="exp-btn" data-exp="30m">30m</button>
+            </div>
+        </div>
+
+        <button class="generate-btn" id="generate-btn">⚡ Get Signal</button>
+
+        <div class="signal-result" id="signal-result">
+            <h3 id="signal-title">Signal Generated!</h3>
+            <div class="signal-expiration-badge" id="signal-exp-badge"></div>
+            <div class="signal-card">
+                <div class="signal-label" id="label-direction">SIGNAL DIRECTION</div>
+                <div class="signal-value" id="signal-direction">—</div>
+            </div>
+            <div class="signal-card">
+                <div class="signal-label" id="label-confidence">CONFIDENCE LEVEL</div>
+                <div class="signal-value" id="signal-confidence">—</div>
+            </div>
+            <div class="signal-timestamp" id="signal-timestamp"></div>
+        </div>
+
+        <div class="chart-section" id="chart-section">
+            <div class="chart-container" id="tradingview-chart"></div>
         </div>
     </div>
+
     <script>
-        const tg = window.Telegram.WebApp;
+        // ----------------------------------------------------------------
+        // Configuration — bot_id from URL query param, defaults to 1
+        // ----------------------------------------------------------------
+        var urlParams = new URLSearchParams(window.location.search);
+        var BOT_ID = parseInt(urlParams.get('bot_id')) || 1;
+        var API_BASE = '/app/' + BOT_ID + '/api';
+
+        var tg = window.Telegram.WebApp;
         tg.expand();
         tg.ready();
 
-        const statusEl = document.getElementById('status');
-        const dataEl = document.getElementById('data');
+        var initData = tg.initData || '';
+        var currentType = 'forex';
+        var currentExpiration = '1m';
+        var translations = {};
+        var currentLang = 'en';
+        var currentPair = '';
 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-            statusEl.textContent = 'Connected as ' + (tg.initDataUnsafe.user.first_name || 'Unknown');
-            statusEl.style.color = '#4caf50';
-        } else {
-            statusEl.textContent = 'Open from Telegram to see user data';
-            statusEl.style.color = '#ff9800';
+        // Detect language: URL param > Telegram user lang > default en
+        var supported = ['en','ru','es','ar','pt','tr','hi','uz','az','tg','ko'];
+        if (urlParams.get('lang') && supported.indexOf(urlParams.get('lang')) !== -1) {
+            currentLang = urlParams.get('lang');
+        } else if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) {
+            var tgLang = tg.initDataUnsafe.user.language_code.substring(0, 2).toLowerCase();
+            if (supported.indexOf(tgLang) !== -1) currentLang = tgLang;
         }
 
-        dataEl.textContent = JSON.stringify(tg.initDataUnsafe, null, 2);
+        function apiHeaders() {
+            var h = {};
+            if (initData) h['X-Telegram-Init-Data'] = initData;
+            return h;
+        }
+
+        function apiGet(url) {
+            return fetch(API_BASE + url, { headers: apiHeaders() }).then(function(r) { return r.json(); });
+        }
+
+        function apiPost(url, body) {
+            return fetch(API_BASE + url, {
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, apiHeaders()),
+                body: JSON.stringify(body)
+            }).then(function(r) { return r.json(); });
+        }
+
+        function t(key, fallback) { return translations[key] || fallback || key; }
+
+        function applyTranslations() {
+            document.getElementById('title').textContent = t('webapp.header', 'Trading Signals');
+            document.getElementById('subtitle').textContent = t('webapp.subtitle', 'Professional signals for binary options');
+            document.getElementById('tab-forex').textContent = t('webapp.tab_forex', 'Forex');
+            document.getElementById('tab-otc').textContent = t('webapp.tab_otc', 'OTC');
+            document.getElementById('label-pair').textContent = t('webapp.currency_pair_label', 'CURRENCY PAIR');
+            document.getElementById('label-expiration').textContent = t('webapp.expiration_label', 'EXPIRATION TIME');
+            document.getElementById('generate-btn').textContent = t('webapp.btn_get_signal', '⚡ Get Signal');
+            document.getElementById('signal-title').textContent = t('webapp.signal_generated', 'Signal Generated!');
+            document.getElementById('label-direction').textContent = t('webapp.signal_direction_label', 'SIGNAL DIRECTION');
+            document.getElementById('label-confidence').textContent = t('webapp.signal_confidence_label', 'CONFIDENCE LEVEL');
+        }
+
+        function loadTranslations(lang) {
+            currentLang = lang;
+            apiGet('/translations?lang=' + lang).then(function(data) {
+                translations = data;
+                applyTranslations();
+            }).catch(function() { /* use fallbacks */ });
+        }
+
+        var languages = [
+            { code: 'en', flag: '\uD83C\uDDEC\uD83C\uDDE7', name: 'English' },
+            { code: 'ru', flag: '\uD83C\uDDF7\uD83C\uDDFA', name: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439' },
+            { code: 'es', flag: '\uD83C\uDDEA\uD83C\uDDF8', name: 'Espa\u00F1ol' },
+            { code: 'ar', flag: '\uD83C\uDDF8\uD83C\uDDE6', name: '\u0627\u0644\u0639\u0631\u0628\u064A\u0629' },
+            { code: 'pt', flag: '\uD83C\uDDE7\uD83C\uDDF7', name: 'Portugu\u00EAs' },
+            { code: 'tr', flag: '\uD83C\uDDF9\uD83C\uDDF7', name: 'T\u00FCrk\u00E7e' },
+            { code: 'hi', flag: '\uD83C\uDDEE\uD83C\uDDF3', name: '\u0939\u093F\u0928\u094D\u0926\u0940' },
+            { code: 'uz', flag: '\uD83C\uDDFA\uD83C\uDDFF', name: "O'zbek" },
+            { code: 'az', flag: '\uD83C\uDDE6\uD83C\uDDFF', name: 'Azerbaycan' },
+            { code: 'tg', flag: '\uD83C\uDDF9\uD83C\uDDEF', name: '\u0422\u043E\u04B7\u0438\u043A\u04E3' },
+            { code: 'ko', flag: '\uD83C\uDDF0\uD83C\uDDF7', name: '\uD55C\uAD6D\uC5B4' }
+        ];
+
+        var langSelect = document.getElementById('lang-select');
+        languages.forEach(function(lang) {
+            var opt = document.createElement('option');
+            opt.value = lang.code;
+            opt.textContent = lang.flag + ' ' + lang.name;
+            if (lang.code === currentLang) opt.selected = true;
+            langSelect.appendChild(opt);
+        });
+        langSelect.addEventListener('change', function() { loadTranslations(this.value); });
+
+        document.querySelectorAll('.tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+                this.classList.add('active');
+                currentType = this.getAttribute('data-type');
+                loadPairs();
+            });
+        });
+
+        document.querySelectorAll('.exp-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.exp-btn').forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+                currentExpiration = this.getAttribute('data-exp');
+            });
+        });
+
+        function loadPairs() {
+            var select = document.getElementById('pair-select');
+            select.innerHTML = '<option value="">Loading...</option>';
+
+            apiGet('/pairs?type=' + currentType).then(function(data) {
+                select.innerHTML = '';
+                if (!data || data.length === 0 || data.error) {
+                    select.innerHTML = '<option value="">No pairs available</option>';
+                    return;
+                }
+                var placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = t('webapp.currency_pair_placeholder', 'Select a pair...');
+                select.appendChild(placeholder);
+
+                data.forEach(function(pair) {
+                    var opt = document.createElement('option');
+                    opt.value = pair.symbol;
+                    opt.textContent = pair.symbol;
+                    if (pair.symbol === 'EUR/USD') opt.selected = true;
+                    select.appendChild(opt);
+                });
+            }).catch(function() {
+                select.innerHTML = '<option value="">Error loading pairs</option>';
+            });
+        }
+
+        function pairToTVSymbol(pair) {
+            var clean = pair.replace('OTC ', '').replace('/', '');
+            return 'FX:' + clean;
+        }
+
+        function loadChart(pair) {
+            var container = document.getElementById('tradingview-chart');
+            container.innerHTML = '';
+
+            var tvSymbol = pairToTVSymbol(pair);
+            var widget = document.createElement('div');
+            widget.id = 'tv-widget';
+            widget.style.width = '100%';
+            widget.style.height = '100%';
+            container.appendChild(widget);
+
+            new TradingView.widget({
+                container_id: 'tv-widget',
+                symbol: tvSymbol,
+                interval: '1',
+                timezone: 'Etc/UTC',
+                theme: 'dark',
+                style: '1',
+                locale: currentLang === 'ru' ? 'ru' : 'en',
+                toolbar_bg: '#1a2733',
+                enable_publishing: false,
+                hide_top_toolbar: false,
+                hide_legend: false,
+                save_image: false,
+                autosize: false,
+                width: '100%',
+                height: 500,
+                studies: ['MASimple@tv-basicstudies', 'RSI@tv-basicstudies'],
+            });
+
+            document.getElementById('chart-section').classList.add('visible');
+        }
+
+        var generateBtn = document.getElementById('generate-btn');
+        generateBtn.addEventListener('click', function() {
+            var pair = document.getElementById('pair-select').value;
+            if (!pair) return;
+
+            currentPair = pair;
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<span class="spinner"></span> ...';
+
+            apiPost('/signal', {
+                pair: pair,
+                expiration: currentExpiration,
+                type: currentType
+            }).then(function(signal) {
+                if (signal.error) { alert(signal.error); return; }
+
+                var dirEl = document.getElementById('signal-direction');
+                if (signal.direction === 'buy') {
+                    dirEl.textContent = t('webapp.signal_direction_buy', 'Buy');
+                    dirEl.className = 'signal-value signal-buy';
+                } else {
+                    dirEl.textContent = t('webapp.signal_direction_sell', 'Sell');
+                    dirEl.className = 'signal-value signal-sell';
+                }
+
+                var confEl = document.getElementById('signal-confidence');
+                var confMap = {
+                    low:    { text: t('webapp.signal_confidence_low', 'Low'),    cls: 'confidence-low' },
+                    medium: { text: t('webapp.signal_confidence_medium', 'Medium'), cls: 'confidence-medium' },
+                    high:   { text: t('webapp.signal_confidence_high', 'High'),   cls: 'confidence-high' }
+                };
+                var conf = confMap[signal.confidence] || confMap.medium;
+                confEl.textContent = conf.text;
+                confEl.className = 'signal-value ' + conf.cls;
+
+                document.getElementById('signal-exp-badge').textContent = signal.expiration;
+                document.getElementById('signal-timestamp').textContent = signal.timestamp;
+
+                var resultEl = document.getElementById('signal-result');
+                resultEl.classList.add('visible');
+
+                loadChart(pair);
+
+                setTimeout(function() {
+                    resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 100);
+            }).catch(function(err) {
+                console.error('Signal error:', err);
+            }).finally(function() {
+                generateBtn.disabled = false;
+                generateBtn.textContent = t('webapp.btn_get_signal', '\u26A1 Get Signal');
+            });
+        });
+
+        loadTranslations(currentLang);
+        loadPairs();
     </script>
+    <script src="https://s3.tradingview.com/tv.js"></script>
 </body>
 </html>

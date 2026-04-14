@@ -47,7 +47,7 @@ def build_main_menu_keyboard(
         rows.append([
             InlineKeyboardButton(
                 text=i18n.t("main_menu.btn_signal", lang),
-                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}"),
+                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={db.bot_id}"),
             ),
         ])
 
@@ -119,7 +119,7 @@ async def cmd_signal(
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
                 text=i18n.t("main_menu.btn_signal", lang),
-                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}"),
+                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={db.bot_id}"),
             )],
         ])
         await message.answer(text=i18n.t("main_menu.btn_signal", lang), reply_markup=kb)
