@@ -25,16 +25,8 @@ class ApiController
     {
         header('Content-Type: application/json');
 
-        // Validate Telegram auth on /app/ routes, except /pairs (public).
-        // Skip auth if no initData header (local dev / browser testing).
-        $path = $f3->get('PATH');
-        if (str_starts_with($path, '/app/') && !str_contains($path, '/api/pairs')) {
-            $initData = $f3->get('HEADERS.X-Telegram-Init-Data')
-                ?: $f3->get('HEADERS.Authorization');
-            if ($initData) {
-                TelegramAuth::check($f3);
-            }
-        }
+        // All /app/ API routes are currently public (no Telegram auth).
+        // Re-enable TelegramAuth::check here when needed.
     }
 
     /**
