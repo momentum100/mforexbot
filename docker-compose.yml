@@ -27,6 +27,8 @@ services:
       DB_USER: ${DB_USER}
       DB_PASS: ${DB_PASS}
       DB_NAME: ${DB_NAME}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - app-network
     restart: unless-stopped
@@ -43,6 +45,8 @@ services:
       DB_USER: ${DB_USER}
       DB_PASS: ${DB_PASS}
       DB_NAME: ${DB_NAME}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: python main.py --bot-id=1
     networks:
       - app-network
