@@ -5,6 +5,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from db import Database
 from i18n import TranslationService
+from images_helper import get_image
 
 router = Router(name="instruction")
 
@@ -47,7 +48,15 @@ async def cb_instruction(
         )],
     ])
 
+    image = get_image("instructions", lang)
+
+    # Delete previous message (can't edit text->photo)
     try:
-        await callback.message.edit_text(text=text, reply_markup=kb)
+        await callback.message.delete()
     except Exception:
+        pass
+
+    if image:
+        await callback.message.answer_photo(photo=image, caption=text, reply_markup=kb)
+    else:
         await callback.message.answer(text=text, reply_markup=kb)

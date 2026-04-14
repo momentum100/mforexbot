@@ -67,17 +67,28 @@ async def _show_main_menu(
     bot_config: dict,
     user: dict,
 ):
-    """Send main menu (Screen 2)."""
+    """Send main menu (Screen 2) with banner image."""
     from handlers.menu import build_main_menu_keyboard
+    from images_helper import get_image
 
     lang = user["lang_code"]
     text = i18n.t("main_menu.title", lang)
     kb = build_main_menu_keyboard(i18n, lang, bot_config, user)
+    image = get_image("main_menu", lang)
 
+    msg = target.message if isinstance(target, types.CallbackQuery) else target
+
+    # Delete previous message if coming from callback (can't edit text->photo)
     if isinstance(target, types.CallbackQuery):
-        await target.message.edit_text(text=text, reply_markup=kb)
+        try:
+            await target.message.delete()
+        except Exception:
+            pass
+
+    if image:
+        await msg.answer_photo(photo=image, caption=text, reply_markup=kb)
     else:
-        await target.answer(text=text, reply_markup=kb)
+        await msg.answer(text=text, reply_markup=kb)
 
 
 @router.message(CommandStart())

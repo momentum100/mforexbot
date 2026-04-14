@@ -71,7 +71,8 @@ $f3->set('ENCODING', 'UTF-8');
 
 ini_set('session.gc_maxlifetime', 1800); // 30 minutes
 ini_set('session.cookie_httponly', 1);
-ini_set('session.cookie_secure', 1);
+// Only secure cookies over HTTPS (production); allow HTTP in local dev
+ini_set('session.cookie_secure', !empty($_SERVER['HTTPS']) ? 1 : 0);
 ini_set('session.cookie_samesite', 'Strict');
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,7 @@ header('X-Content-Type-Options: nosniff');
 
 // --- Admin Panel ---
 $f3->route('GET /admin', 'App\Controllers\AdminController->redirectToBots');
+$f3->route('GET /admin/', 'App\Controllers\AdminController->redirectToBots');
 $f3->route('GET /admin/login', 'App\Controllers\AuthController->loginForm');
 $f3->route('POST /admin/login', 'App\Controllers\AuthController->login');
 $f3->route('GET /admin/logout', 'App\Controllers\AuthController->logout');

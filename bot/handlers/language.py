@@ -128,12 +128,6 @@ async def cb_select_language(
                 pass
             return
 
-    # Show main menu
-    from handlers.menu import build_main_menu_keyboard
-
-    text = i18n.t("main_menu.title", lang)
-    kb = build_main_menu_keyboard(i18n, lang, bot_config, user)
-    try:
-        await callback.message.edit_text(text=text, reply_markup=kb)
-    except Exception:
-        await callback.message.answer(text=text, reply_markup=kb)
+    # Show main menu (with banner image)
+    from handlers.start import _show_main_menu
+    await _show_main_menu(callback, db, i18n, bot_config, user)

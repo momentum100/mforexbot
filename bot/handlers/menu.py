@@ -47,7 +47,7 @@ def build_main_menu_keyboard(
         rows.append([
             InlineKeyboardButton(
                 text=i18n.t("main_menu.btn_signal", lang),
-                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={db.bot_id}"),
+                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={bot_config['id']}"),
             ),
         ])
 
@@ -78,9 +78,18 @@ async def cb_main_menu(
     lang = user["lang_code"]
     text = i18n.t("main_menu.title", lang)
     kb = build_main_menu_keyboard(i18n, lang, bot_config, user)
+
+    from images_helper import get_image
+    image = get_image("main_menu", lang)
+
     try:
-        await callback.message.edit_text(text=text, reply_markup=kb)
+        await callback.message.delete()
     except Exception:
+        pass
+
+    if image:
+        await callback.message.answer_photo(photo=image, caption=text, reply_markup=kb)
+    else:
         await callback.message.answer(text=text, reply_markup=kb)
 
 
@@ -119,7 +128,7 @@ async def cmd_signal(
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
                 text=i18n.t("main_menu.btn_signal", lang),
-                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={db.bot_id}"),
+                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={bot_config['id']}"),
             )],
         ])
         await message.answer(text=i18n.t("main_menu.btn_signal", lang), reply_markup=kb)
