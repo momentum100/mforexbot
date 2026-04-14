@@ -13,18 +13,28 @@ $f3 = \Base::instance();
 // Environment Configuration
 // ---------------------------------------------------------------------------
 
-// Load .env from project root
-$envFile = __DIR__ . '/../../.env';
-if (file_exists($envFile)) {
-    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    foreach ($lines as $line) {
-        $line = trim($line);
-        if ($line === '' || str_starts_with($line, '#')) {
-            continue;
-        }
-        if (str_contains($line, '=')) {
-            [$key, $value] = explode('=', $line, 2);
-            $f3->set(trim($key), trim($value));
+// Load config from environment variables (Docker) or .env file (local dev)
+foreach (['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASS', 'DB_NAME'] as $key) {
+    $val = getenv($key);
+    if ($val !== false) {
+        $f3->set($key, $val);
+    }
+}
+
+// Fallback: load .env from project root (local dev without Docker)
+if (!$f3->get('DB_HOST')) {
+    $envFile = __DIR__ . '/../../.env';
+    if (file_exists($envFile)) {
+        $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+            if (str_contains($line, '=')) {
+                [$key, $value] = explode('=', $line, 2);
+                $f3->set(trim($key), trim($value));
+            }
         }
     }
 }

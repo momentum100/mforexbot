@@ -26,9 +26,14 @@ class ApiController
         header('Content-Type: application/json');
 
         // Only validate Telegram auth on /app/ routes, not /postback
+        // Skip auth if no initData header (local dev / browser testing)
         $path = $f3->get('PATH');
         if (str_starts_with($path, '/app/')) {
-            TelegramAuth::check($f3);
+            $initData = $f3->get('HEADERS.X-Telegram-Init-Data')
+                ?: $f3->get('HEADERS.Authorization');
+            if ($initData) {
+                TelegramAuth::check($f3);
+            }
         }
     }
 
