@@ -21,18 +21,26 @@ class TelegramNotifier
         $url = 'https://api.telegram.org/bot' . $token . '/sendMessage';
         $ctx = stream_context_create([
             'http' => [
-                'method'  => 'POST',
-                'header'  => 'Content-Type: application/json',
-                'content' => json_encode($payload, JSON_UNESCAPED_UNICODE),
-                'timeout' => 5,
+                'method'        => 'POST',
+                'header'        => 'Content-Type: application/json',
+                'content'       => json_encode($payload, JSON_UNESCAPED_UNICODE),
+                'timeout'       => 5,
+                'ignore_errors' => true,
             ],
         ]);
         try {
-            $result = file_get_contents($url, false, $ctx);
+            $result = @file_get_contents($url, false, $ctx);
             if ($result === false) {
                 error_log('TelegramNotifier::send failed for chat_id='
                     . ($payload['chat_id'] ?? '?') . ': '
                     . (error_get_last()['message'] ?? 'unknown'));
+                return false;
+            }
+            $decoded = json_decode($result, true);
+            if (isset($decoded['ok']) && $decoded['ok'] === false) {
+                error_log('TelegramNotifier::send API error for chat_id='
+                    . ($payload['chat_id'] ?? '?') . ': '
+                    . ($decoded['description'] ?? $result));
                 return false;
             }
             return true;
