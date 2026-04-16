@@ -78,8 +78,12 @@
                 <input type="text" name="linked_channel" id="bot-linked-channel" style="width:100%;" placeholder="@channel или https://t.me/+invite">
             </div>
             <div>
-                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">ID канала (числовой)</label>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">ID канала для подписки</label>
                 <input type="text" name="linked_channel_id" id="bot-linked-channel-id" style="width:100%;" placeholder="-1001234567890">
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">ID группы — админы</label>
+                <input type="text" name="admin_group_id" id="bot-admin-group-id" style="width:100%;" placeholder="-100XXXXXXXXXX">
             </div>
             <div>
                 <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Ссылка поддержки</label>
@@ -227,6 +231,7 @@
         document.getElementById('bot-webapp-url').value = bot.webapp_url || '';
         document.getElementById('bot-linked-channel').value = bot.linked_channel || '';
         document.getElementById('bot-linked-channel-id').value = bot.linked_channel_id || '';
+        document.getElementById('bot-admin-group-id').value = bot.admin_group_id || '';
         document.getElementById('bot-support-link').value = bot.support_link || '';
         document.getElementById('bot-referral-url').value = bot.referral_url_template || '';
         document.getElementById('bot-postback-secret').value = bot.postback_secret || '';
@@ -245,6 +250,7 @@
         document.getElementById('bot-webapp-url').value = '';
         document.getElementById('bot-linked-channel').value = '';
         document.getElementById('bot-linked-channel-id').value = '';
+        document.getElementById('bot-admin-group-id').value = '';
         document.getElementById('bot-support-link').value = '';
         document.getElementById('bot-referral-url').value = '';
         document.getElementById('bot-postback-secret').value = '';

@@ -591,6 +591,7 @@ Visible OTC pairs (partial list from screenshot):
 | webapp_url | VARCHAR(255) NULL | Base URL for Mini Web App |
 | linked_channel | VARCHAR(255) NULL | Channel URL or @username — used to build the "Subscribe" button URL |
 | linked_channel_id | VARCHAR(50) NULL | Numeric Telegram chat_id (e.g. `-1001234567890`) — used for `getChatMember` API calls |
+| admin_group_id | VARCHAR(50) NULL | Telegram chat ID группы админов — бот шлёт уведомления о событиях пользователей |
 | support_link | VARCHAR(255) NULL | Support contact t.me/ link (URL button) |
 | referral_url_template | VARCHAR(500) NULL | Referral URL with `{user_id}` placeholder |
 | postback_secret | VARCHAR(255) NULL | Shared secret for postback authentication |
@@ -694,6 +695,125 @@ All keys must be seeded for every supported language (EN, RU, ES, AR, PT, TR, HI
 | `password.cancelled` | Confirmation shown after Cancel | `Отменено.` | `Cancelled.` |
 | `register.btn_enter_password` | Extra button on the combined gate that opens the password FSM | `🔑 Ввести код доступа` | `🔑 Enter access code` |
 | `register.combined_required` | Prompt text on the combined gate (affiliate + password on one screen) | `⚠️ Для использования бота зарегистрируйтесь по ссылке партнёра или введите код доступа:` | `⚠️ To use the bot, register via the partner link or enter an access code:` |
+
+### DB Table: `settings` (global key-value)
+
+Truly global settings — **no `bot_id` column**. Shared across all bots.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | VARCHAR(64) | PK — setting name |
+| `value` | TEXT NULL | Setting value |
+| updated_at | DATETIME | Auto-updated on change |
+
+**Current keys:**
+
+| Key | Description | Managed at |
+|-----|-------------|------------|
+| `postback_base_url` | Base URL for building postback URLs shown in bot edit form | `/admin/settings` |
+
+Seeded by `migrations/017_add_settings_table.sql`.
+
+---
+
+## User Status Lifecycle
+
+Users progress through a status lifecycle tracked in `users.status`:
+
+```
+new  ──►  registered  ──►  deposited
+```
+
+| Status | How user reaches it |
+|--------|---------------------|
+| `new` | Default on user creation |
+| `registered` | Bot sets when user passes all gates and reaches main menu (Screen 2); OR postback `event=reg` with `auth_status='ok'` |
+| `deposited` | Postback `event=ftd` with `auth_status='ok'` |
+
+**Rules:**
+- Status **only upgrades**, never downgrades (`deposited` -> `registered` is never allowed).
+- PHP postback endpoint updates `users.status` on `reg` and `ftd` events.
+- Bot Python code updates `users.status = 'registered'` when user passes all gates.
+- Statistics (Screen 5a) and webapp access gate both rely on this field.
+
+---
+
+## Admin Panel (Web)
+
+### Navigation
+
+| Nav item | URL | Description |
+|----------|-----|-------------|
+| Боты | `/admin/bots` | Bot management (CRUD) |
+| Постбэки | `/admin/postbacks` | Postback event log |
+| Пользователи | `/admin/users` | User management across all bots |
+| Настройки | `/admin/settings` | Global platform settings |
+
+---
+
+### Admin: Settings Page (`/admin/settings`)
+
+Global platform settings (not per-bot). Edits the `settings` table.
+
+**Current fields:**
+- **Postback Base URL** (`postback_base_url`) — e.g. `https://mforexbot.yooriko.com`. Used to render the postback URL hint in bot edit forms.
+
+---
+
+### Admin: Bot Edit Form
+
+Bot edit form (`/admin/bots`) includes the following fields relevant to today's features:
+
+| Field | Column | Label (admin UI) | Notes |
+|-------|--------|-------------------|-------|
+| Linked channel ID | `linked_channel_id` | ID канала для подписки | Numeric Telegram chat_id for `getChatMember` |
+| Admin group ID | `admin_group_id` | ID группы — админы | Telegram chat ID; bot sends event notifications here |
+| Access password | `access_password` | Пароль доступа | Plaintext; enables password gate (Screen 1c) |
+| Postback secret | `postback_secret` | Postback Secret | Shared secret for postback auth |
+
+**Postback URL hint** — shown below the `postback_secret` field. Three states:
+
+| Condition | Displayed |
+|-----------|-----------|
+| `postback_base_url` not set | "Укажите Postback Base URL в Настройках" |
+| `postback_secret` not set for this bot | "Заполните Postback Secret выше" |
+| Both set | Full URL with copy button: `{base_url}/postback?secret={secret}&event=reg` |
+
+Format: `{base_url}/postback?secret={secret}&event=reg` (partner appends `click_id` and `sub_id1` automatically). See [postbacks.md](postbacks.md) for details.
+
+---
+
+### Admin: Users Page (`/admin/users`)
+
+List of all users across all bots.
+
+**Columns:** id, bot_id, telegram_id, username, first_name, lang_code, status, is_admin, password_passed, created_at.
+
+**Filters:**
+- Bot selector (dropdown — all bots or specific)
+- Search input (matches `telegram_id`, `username`, or `first_name`)
+
+**Pagination:** 50 per page, server-side.
+
+**Actions per user:**
+- Delete user (POST `/admin/users/{id}/delete`)
+- Toggle admin flag (POST `/admin/users/{id}/toggle-admin`)
+
+---
+
+### Translation keys for webapp access-denied stub (Screen 4)
+
+Seeded by `migrations/018_seed_webapp_access_translations.sql`.
+
+| Key | Purpose | RU example | EN example |
+|-----|---------|------------|------------|
+| `webapp.access_denied_title` | Stub heading | `Доступ ограничен` | `Access restricted` |
+| `webapp.access_denied_text` | Explanation paragraph | `Для использования сервиса сигналов...` | `To use the signal service, complete...` |
+| `webapp.access_denied_subscribe` | Step: subscribe to channel | `Подпишитесь на канал бота` | `Subscribe to the bot channel` |
+| `webapp.access_denied_register` | Step: complete registration | `Пройдите регистрацию или введите код доступа` | `Complete registration or enter access code` |
+| `webapp.access_denied_support` | Step: contact support | `Или напишите в поддержку` | `Or contact support` |
+| `webapp.access_denied_btn_support` | Support button label | `Поддержка` | `Support` |
+| `webapp.access_denied_btn_retry` | Retry button label | `Проверить снова` | `Check again` |
 
 ### Multi-tenant note
 - **Every query** filters by `bot_id`

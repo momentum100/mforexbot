@@ -253,7 +253,7 @@ class ApiController
             $httpCode   = 400;
             $response   = ['error' => 'Missing required parameters: bot_id (sub_id1/bot_id/site_id), event'];
         } else {
-            $bot = $db->exec('SELECT id, postback_secret, token, support_link FROM bots WHERE id = ?', [$botId]);
+            $bot = $db->exec('SELECT id, name, postback_secret, token, support_link, admin_group_id FROM bots WHERE id = ?', [$botId]);
             if (empty($bot)) {
                 $authStatus = 'unknown_bot';
                 $httpCode   = 404;
@@ -327,6 +327,36 @@ class ApiController
                      WHERE bot_id = ? AND telegram_id = ? AND status IN ('new','registered')",
                     [$botId, $telegramId]
                 );
+            }
+
+            // Notify admin group about the event (fire-and-forget).
+            try {
+                $adminGroupId = $bot[0]['admin_group_id'] ?? '';
+                $botToken = $bot[0]['token'] ?? '';
+                if ($adminGroupId !== '' && $botToken !== '') {
+                    $botName = $bot[0]['name'] ?? '';
+                    // Look up username for richer context.
+                    $userRow = $db->exec(
+                        'SELECT username FROM users WHERE bot_id = ? AND telegram_id = ?',
+                        [$botId, $telegramId]
+                    );
+                    $username = (!empty($userRow) && !empty($userRow[0]['username']))
+                        ? $userRow[0]['username'] : '';
+
+                    $adminMsg = "👤 Новый пользователь зарегистрировался!\n"
+                        . "Bot: {$botName} (ID: {$botId})\n"
+                        . "User: {$telegramId} (@{$username})\n"
+                        . "Event: {$event}";
+
+                    $url = 'https://api.telegram.org/bot' . $botToken . '/sendMessage';
+                    $payload = [
+                        'chat_id' => $adminGroupId,
+                        'text'    => $adminMsg,
+                    ];
+                    @file_get_contents($url . '?' . http_build_query($payload));
+                }
+            } catch (\Throwable $e) {
+                error_log('Admin group notification failed: ' . $e->getMessage());
             }
         }
 

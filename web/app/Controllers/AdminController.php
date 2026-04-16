@@ -203,6 +203,7 @@ class AdminController
         $webappUrl = trim($f3->get('POST.webapp_url') ?? '') ?: null;
         $linkedChannel = trim($f3->get('POST.linked_channel') ?? '') ?: null;
         $linkedChannelId = trim($f3->get('POST.linked_channel_id') ?? '') ?: null;
+        $adminGroupId = trim($f3->get('POST.admin_group_id') ?? '') ?: null;
         $supportLink = trim($f3->get('POST.support_link') ?? '') ?: null;
         $referralUrlTemplate = trim($f3->get('POST.referral_url_template') ?? '') ?: null;
         $postbackSecret = trim($f3->get('POST.postback_secret') ?? '') ?: null;
@@ -221,17 +222,17 @@ class AdminController
             // Update existing bot
             $db->exec(
                 'UPDATE bots SET name = ?, token = ?, webapp_url = ?, linked_channel = ?, linked_channel_id = ?,
-                 support_link = ?, referral_url_template = ?, postback_secret = ?, access_password = ?, is_active = ?,
+                 admin_group_id = ?, support_link = ?, referral_url_template = ?, postback_secret = ?, access_password = ?, is_active = ?,
                  updated_at = NOW()
                  WHERE id = ?',
-                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive, $id]
+                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive, $id]
             );
         } else {
             // Create new bot
             $db->exec(
-                'INSERT INTO bots (name, token, webapp_url, linked_channel, linked_channel_id, support_link, referral_url_template, postback_secret, access_password, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive]
+                'INSERT INTO bots (name, token, webapp_url, linked_channel, linked_channel_id, admin_group_id, support_link, referral_url_template, postback_secret, access_password, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive]
             );
         }
 

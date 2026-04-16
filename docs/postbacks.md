@@ -89,6 +89,29 @@ https://mforexbot.yooriko.com/postback?secret=777&event=reg
 
 Только `reg` используется для gate'а регистрации. Остальные события просто логируются в `postback_events` и могут быть использованы для будущей логики (FTD-гейт, аналитика, уведомления).
 
+### Обновление `users.status` при постбеке
+
+При успешном постбеке (`auth_status='ok'`) PHP обновляет поле `users.status`:
+
+| `event` | Новый `status` | Условие |
+|---------|----------------|---------|
+| `reg` | `registered` | Только если текущий статус = `new` |
+| `ftd` | `deposited` | Только если текущий статус != `deposited` |
+
+Статус **только повышается**, никогда не понижается. Подробнее о жизненном цикле — см. [bot-flow.md → User Status Lifecycle](bot-flow.md#user-status-lifecycle).
+
+### Уведомление пользователю при регистрации
+
+При `event=reg` с `auth_status='ok'`, PHP отправляет пользователю сообщение в Telegram. Текст берётся из ключа перевода `postback.reg_congrats` (язык = `users.lang_code`). Содержит плейсхолдер `{support_link}`, подставляемый из `bots.support_link`. Отправка — fire-and-forget через Bot API (`sendMessage`), ошибки логируются, но не влияют на HTTP-ответ постбека.
+
+### Уведомление в админ-группу
+
+При **любом** постбеке с `auth_status='ok'`, если у бота задан `bots.admin_group_id` (Telegram chat ID группы администраторов), PHP отправляет уведомление в эту группу.
+
+**Содержание сообщения:** имя бота, telegram_id пользователя, username, тип события.
+
+Отправка — fire-and-forget через Bot API (`sendMessage`). Поле `admin_group_id` управляется в Admin -> Боты -> Редактировать (label: "ID группы — админы"). См. [bot-flow.md → Admin: Bot Edit Form](bot-flow.md#admin-bot-edit-form).
+
 ## URL постбек-эндпоинта (настройки админки)
 
 Наш приёмный эндпоинт: `GET {POSTBACK_BASE_URL}/postback?bot_id={site_id}&user_id={sub_id1}&event=reg&secret={bots.postback_secret}`
