@@ -227,12 +227,24 @@ class AdminController
                  WHERE id = ?',
                 [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive, $id]
             );
+            $botId = $id;
         } else {
             // Create new bot
             $db->exec(
                 'INSERT INTO bots (name, token, webapp_url, linked_channel, linked_channel_id, admin_group_id, support_link, referral_url_template, postback_secret, access_password, is_active)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive]
+            );
+            $botId = (int) $db->exec('SELECT LAST_INSERT_ID() AS id')[0]['id'];
+        }
+
+        // Auto-fill webapp_url from postback_base_url if the field was left empty.
+        $baseUrl = $this->getSetting($db, 'postback_base_url');
+        if ($baseUrl) {
+            $autoWebappUrl = rtrim($baseUrl, '/') . '/app/' . $botId . '/';
+            $db->exec(
+                'UPDATE bots SET webapp_url = ? WHERE id = ? AND (webapp_url IS NULL OR webapp_url = "")',
+                [$autoWebappUrl, $botId]
             );
         }
 
