@@ -301,7 +301,7 @@ class ApiController
                     $botToken = $bot[0]['token'] ?? '';
                     $supportLink = $bot[0]['support_link'] ?? '';
                     if ($botToken !== '' && $supportLink !== '') {
-                        // Normalize t.me links to @username for display.
+                        // Normalize t.me links to @username for cleaner display.
                         if (str_starts_with($supportLink, 'https://t.me/')) {
                             $supportLink = '@' . ltrim(substr($supportLink, strlen('https://t.me/')), '/');
                         }

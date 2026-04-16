@@ -27,14 +27,20 @@ class TelegramNotifier
                 'timeout' => 5,
             ],
         ]);
-        $result = @file_get_contents($url, false, $ctx);
-        if ($result === false) {
-            error_log('TelegramNotifier::send failed for chat_id='
-                . ($payload['chat_id'] ?? '?') . ': '
-                . (error_get_last()['message'] ?? 'unknown'));
+        try {
+            $result = file_get_contents($url, false, $ctx);
+            if ($result === false) {
+                error_log('TelegramNotifier::send failed for chat_id='
+                    . ($payload['chat_id'] ?? '?') . ': '
+                    . (error_get_last()['message'] ?? 'unknown'));
+                return false;
+            }
+            return true;
+        } catch (\Throwable $e) {
+            error_log('TelegramNotifier::send exception for chat_id='
+                . ($payload['chat_id'] ?? '?') . ': ' . $e->getMessage());
             return false;
         }
-        return true;
     }
 
     /**

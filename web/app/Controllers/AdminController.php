@@ -352,8 +352,16 @@ class AdminController
 
         try {
             $db = $f3->get('DB');
+            // Look up bot_id + telegram_id before deleting, to also purge postback_events.
+            $user = $db->exec('SELECT bot_id, telegram_id FROM users WHERE id = ?', [$id]);
             $db->exec('DELETE FROM users WHERE id = ?', [$id]);
-            $_SESSION['flash'] = 'Пользователь #' . $id . ' удалён.';
+            if (!empty($user)) {
+                $db->exec(
+                    'DELETE FROM postback_events WHERE bot_id = ? AND telegram_id = ?',
+                    [$user[0]['bot_id'], $user[0]['telegram_id']]
+                );
+            }
+            $_SESSION['flash'] = 'Пользователь #' . $id . ' и его постбеки удалены.';
         } catch (\Throwable $e) {
             // Most likely cause: a FK from some other table points at users.id.
             $_SESSION['flash_error'] = 'Не удалось удалить пользователя: ' . $e->getMessage();
