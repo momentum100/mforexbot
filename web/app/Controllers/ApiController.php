@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Constants\PostbackEvent;
+use App\Constants\UserStatus;
 use App\Middleware\TelegramAuth;
 use App\Services\TelegramNotifier;
 
@@ -212,8 +214,97 @@ class ApiController
      * Returns: 200 on success, 400 on missing params, 401 on bad secret,
      * 404 on unknown bot. Every request is logged to postback_events
      * regardless of outcome — see docs/postbacks.md.
+     *
+     * This method is intentionally a thin coordinator; the actual work is
+     * split across resolvePostbackParams / authenticatePostback /
+     * recordPostbackEvent / applyStatusTransition / notifyUser /
+     * notifyAdminGroup below.
      */
     public function postback(\Base $f3): void
+    {
+        $db = $f3->get('DB');
+
+        // 1. Parse incoming params (handles sub_id1/bot_id/site_id,
+        //    click_id/user_id, event/status aliases).
+        [$botId, $telegramId, $event, $secret, $rawQuery, $params]
+            = $this->resolvePostbackParams($f3);
+
+        // 2. Classify the request. Output state (default = accepted).
+        $authStatus = 'ok';
+        $httpCode   = 200;
+        $response   = ['ok' => true];
+        $bot        = null;
+        $botIdForLog = $botId;
+
+        if ($botId === null || $event === '') {
+            $authStatus = 'missing_params';
+            $httpCode   = 400;
+            $response   = ['error' => 'Missing required parameters: bot_id (sub_id1/bot_id/site_id), event'];
+        } else {
+            $botRows = $db->exec(
+                'SELECT id, name, postback_secret, token, support_link, admin_group_id FROM bots WHERE id = ?',
+                [$botId]
+            );
+            if (empty($botRows)) {
+                $authStatus = 'unknown_bot';
+                $httpCode   = 404;
+                $response   = ['error' => 'Bot not found'];
+                // Keep bot_id for the log row even though FK will reject — store NULL to allow insert.
+                $botIdForLog = null;
+            } else {
+                $bot = $botRows[0];
+                $authStatus = $this->authenticatePostback($bot, $secret);
+                if ($authStatus === 'bad_secret') {
+                    $httpCode = 401;
+                    $response = ['error' => 'Invalid secret'];
+                }
+            }
+        }
+
+        // 3. Always log — accepted or not.
+        $this->recordPostbackEvent(
+            $db,
+            $botIdForLog,
+            $telegramId,
+            $event !== '' ? $event : null,
+            $authStatus,
+            $params,
+            $rawQuery,
+            (string) $f3->get('IP')
+        );
+
+        // 4. On successful auth with a known telegram_id, mutate user state
+        //    and fire notifications.
+        if ($authStatus === 'ok' && $telegramId !== null && $bot !== null) {
+            $this->applyStatusTransition($db, $botId, $telegramId, $event);
+
+            if ($event === PostbackEvent::REG) {
+                try {
+                    $this->notifyUser($db, $bot, $telegramId);
+                } catch (\Throwable $e) {
+                    error_log('Postback reg notification failed: ' . $e->getMessage());
+                }
+            }
+
+            try {
+                $this->notifyAdminGroup($db, $bot, $botId, $telegramId, $event);
+            } catch (\Throwable $e) {
+                error_log('Admin group notification failed: ' . $e->getMessage());
+            }
+        }
+
+        http_response_code($httpCode);
+        echo json_encode($response);
+    }
+
+    /**
+     * Parse the raw GET params off the request and resolve the canonical
+     * postback fields, applying the legacy-alias priority.
+     *
+     * @return array{0:?int,1:?int,2:string,3:string,4:string,5:array}
+     *         [botId, telegramId, event, secret, rawQuery, paramsForLog]
+     */
+    private function resolvePostbackParams(\Base $f3): array
     {
         $params = $f3->get('GET') ?? [];
         unset($params['secret']); // never log the secret
@@ -231,135 +322,159 @@ class ApiController
             $f3->get('GET.click_id'),
             $f3->get('GET.user_id')
         );
+        $telegramId = (is_numeric($clickId) && (int) $clickId > 0) ? (int) $clickId : null;
 
         $event = trim((string) ($this->firstNonEmpty(
             $f3->get('GET.event'),
             $f3->get('GET.status')
         ) ?? ''));
-        $secret   = (string) ($f3->get('GET.secret') ?? '');
-        $telegramId = (is_numeric($clickId) && (int) $clickId > 0) ? (int) $clickId : null;
+        $secret = (string) ($f3->get('GET.secret') ?? '');
 
         $rawQuery = (string) ($_SERVER['QUERY_STRING'] ?? '');
         $rawQuery = preg_replace('/(^|&)secret=[^&]*/', '$1secret=REDACTED', $rawQuery);
 
-        // Classify request so we can log it and still return an accurate status.
-        $authStatus = 'ok';
-        $httpCode   = 200;
-        $response   = ['ok' => true];
+        return [$botId, $telegramId, $event, $secret, $rawQuery, $params];
+    }
 
-        $db = $f3->get('DB');
-
-        if ($botId === null || $event === '') {
-            $authStatus = 'missing_params';
-            $httpCode   = 400;
-            $response   = ['error' => 'Missing required parameters: bot_id (sub_id1/bot_id/site_id), event'];
-        } else {
-            $bot = $db->exec('SELECT id, name, postback_secret, token, support_link, admin_group_id FROM bots WHERE id = ?', [$botId]);
-            if (empty($bot)) {
-                $authStatus = 'unknown_bot';
-                $httpCode   = 404;
-                $response   = ['error' => 'Bot not found'];
-                // Keep bot_id for the log row even though FK will reject — store NULL to allow insert.
-                $botIdForLog = null;
-            } else {
-                $expectedSecret = $bot[0]['postback_secret'] ?? '';
-                if ($expectedSecret === '' || !hash_equals($expectedSecret, $secret)) {
-                    $authStatus = 'bad_secret';
-                    $httpCode   = 401;
-                    $response   = ['error' => 'Invalid secret'];
-                }
-                $botIdForLog = $botId;
-            }
+    /**
+     * Compare the presented secret against the bot's stored postback_secret.
+     *
+     * Returns 'ok' when the secret matches (and the stored value is
+     * non-empty), 'bad_secret' otherwise.
+     */
+    private function authenticatePostback(array $bot, string $secret): string
+    {
+        $expectedSecret = $bot['postback_secret'] ?? '';
+        if ($expectedSecret === '' || !hash_equals($expectedSecret, $secret)) {
+            return 'bad_secret';
         }
+        return 'ok';
+    }
 
-        // Log EVERY request (accepted or not) for debugging.
+    /**
+     * Append a row to the postback_events audit log. Called for every
+     * request regardless of outcome — the log is the single source of truth
+     * for what the partner sent us.
+     */
+    private function recordPostbackEvent(
+        \DB\SQL $db,
+        ?int $botId,
+        ?int $telegramId,
+        ?string $event,
+        string $authStatus,
+        array $params,
+        string $rawQuery,
+        string $ip
+    ): void {
         $db->exec(
             'INSERT INTO postback_events (bot_id, telegram_id, event_type, auth_status, params_json, raw_query, ip)
              VALUES (?, ?, ?, ?, ?, ?, ?)',
             [
-                $botIdForLog ?? $botId,
+                $botId,
                 $telegramId,
-                $event !== '' ? $event : null,
+                $event,
                 $authStatus,
                 json_encode($params, JSON_UNESCAPED_UNICODE),
                 $rawQuery,
-                $f3->get('IP'),
+                $ip,
             ]
         );
+    }
 
-        // Update user status on successful postback events.
-        if ($authStatus === 'ok' && $telegramId !== null) {
-            if ($event === 'reg') {
-                $db->exec(
-                    "UPDATE users SET status = 'registered', updated_at = NOW()
-                     WHERE bot_id = ? AND telegram_id = ? AND status = 'new'",
-                    [$botId, $telegramId]
-                );
+    /**
+     * Move a user's status along the funnel in response to an accepted
+     * postback. Idempotent — each UPDATE is guarded by the status the
+     * transition can come from, so replaying a postback never downgrades.
+     *
+     *   reg → 'new' ..................→ 'registered'
+     *   ftd → 'new' | 'registered' ..→ 'deposited'
+     *
+     * Any other event (redep / commission / withdrawal / unknown) is a no-op.
+     */
+    private function applyStatusTransition(\DB\SQL $db, int $botId, int $telegramId, string $event): void
+    {
+        if ($event === PostbackEvent::REG) {
+            $db->exec(
+                'UPDATE users SET status = ?, updated_at = NOW()
+                 WHERE bot_id = ? AND telegram_id = ? AND status = ?',
+                [UserStatus::REGISTERED, $botId, $telegramId, UserStatus::NEW]
+            );
+        } elseif ($event === PostbackEvent::FTD) {
+            $db->exec(
+                'UPDATE users SET status = ?, updated_at = NOW()
+                 WHERE bot_id = ? AND telegram_id = ? AND status IN (?, ?)',
+                [UserStatus::DEPOSITED, $botId, $telegramId, UserStatus::NEW, UserStatus::REGISTERED]
+            );
+        }
+    }
 
-                // Send congratulations notification via Telegram Bot API (fire-and-forget).
-                try {
-                    $botToken = $bot[0]['token'] ?? '';
-                    $supportLink = $bot[0]['support_link'] ?? '';
-                    if ($botToken !== '' && $supportLink !== '') {
-                        // Normalize t.me links to @username for cleaner display.
-                        if (str_starts_with($supportLink, 'https://t.me/')) {
-                            $supportLink = '@' . ltrim(substr($supportLink, strlen('https://t.me/')), '/');
-                        }
-
-                        $userRow = $db->exec(
-                            'SELECT lang_code FROM users WHERE bot_id = ? AND telegram_id = ?',
-                            [$botId, $telegramId]
-                        );
-                        $langCode = (!empty($userRow)) ? $userRow[0]['lang_code'] : 'en';
-
-                        $msgText = $this->getTranslation($f3, $botId, 'postback.reg_congrats', $langCode);
-                        if ($msgText !== '') {
-                            $msgText = str_replace('{support_link}', $supportLink, $msgText);
-                            TelegramNotifier::sendMessage($botToken, $telegramId, $msgText, [
-                                'parse_mode' => 'HTML',
-                                'disable_web_page_preview' => true,
-                            ]);
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    error_log('Postback reg notification failed: ' . $e->getMessage());
-                }
-            } elseif ($event === 'ftd') {
-                $db->exec(
-                    "UPDATE users SET status = 'deposited', updated_at = NOW()
-                     WHERE bot_id = ? AND telegram_id = ? AND status IN ('new','registered')",
-                    [$botId, $telegramId]
-                );
-            }
-
-            // Notify admin group about the event (fire-and-forget).
-            try {
-                $adminGroupId = $bot[0]['admin_group_id'] ?? '';
-                $botToken = $bot[0]['token'] ?? '';
-                if ($adminGroupId !== '' && $botToken !== '') {
-                    $botName = $bot[0]['name'] ?? '';
-                    // Look up username for richer context.
-                    $userRow = $db->exec(
-                        'SELECT username FROM users WHERE bot_id = ? AND telegram_id = ?',
-                        [$botId, $telegramId]
-                    );
-                    $username = (!empty($userRow) && !empty($userRow[0]['username']))
-                        ? $userRow[0]['username'] : '';
-
-                    $adminMsg = "👤 Новый пользователь зарегистрировался!\n"
-                        . "Bot: {$botName} (ID: {$botId})\n"
-                        . "User: {$telegramId} (@{$username})\n"
-                        . "Event: {$event}";
-
-                    TelegramNotifier::sendMessage($botToken, $adminGroupId, $adminMsg);
-                }
-            } catch (\Throwable $e) {
-                error_log('Admin group notification failed: ' . $e->getMessage());
-            }
+    /**
+     * Send the "registration congrats" DM to the user (reg event only).
+     *
+     * Fire-and-forget; caller wraps in try/catch so a failed Telegram call
+     * never blocks the 200 OK we owe the partner.
+     */
+    private function notifyUser(\DB\SQL $db, array $bot, int $telegramId): void
+    {
+        $botToken = $bot['token'] ?? '';
+        $supportLink = $bot['support_link'] ?? '';
+        if ($botToken === '' || $supportLink === '') {
+            return;
         }
 
-        http_response_code($httpCode);
-        echo json_encode($response);
+        // Normalize t.me links to @username for cleaner display.
+        if (str_starts_with($supportLink, 'https://t.me/')) {
+            $supportLink = '@' . ltrim(substr($supportLink, strlen('https://t.me/')), '/');
+        }
+
+        $botId = (int) ($bot['id'] ?? 0);
+        $userRow = $db->exec(
+            'SELECT lang_code FROM users WHERE bot_id = ? AND telegram_id = ?',
+            [$botId, $telegramId]
+        );
+        $langCode = (!empty($userRow)) ? $userRow[0]['lang_code'] : 'en';
+
+        $msgText = $this->getTranslation($db, $botId, 'postback.reg_congrats', $langCode);
+        if ($msgText === '') {
+            return;
+        }
+
+        $msgText = str_replace('{support_link}', $supportLink, $msgText);
+        TelegramNotifier::sendMessage($botToken, $telegramId, $msgText, [
+            'parse_mode' => 'HTML',
+            'disable_web_page_preview' => true,
+        ]);
+    }
+
+    /**
+     * Post a plain-text notification to the bot's admin group summarising
+     * the event. Fired for every accepted event (reg/ftd/redep/...).
+     *
+     * Silent when admin_group_id or token is missing.
+     */
+    private function notifyAdminGroup(\DB\SQL $db, array $bot, int $botId, ?int $telegramId, string $event): void
+    {
+        $adminGroupId = $bot['admin_group_id'] ?? '';
+        $botToken = $bot['token'] ?? '';
+        if ($adminGroupId === '' || $botToken === '') {
+            return;
+        }
+
+        $botName = $bot['name'] ?? '';
+        // Look up username for richer context.
+        $userRow = $db->exec(
+            'SELECT username FROM users WHERE bot_id = ? AND telegram_id = ?',
+            [$botId, $telegramId]
+        );
+        $username = (!empty($userRow) && !empty($userRow[0]['username']))
+            ? $userRow[0]['username'] : '';
+
+        $adminMsg = "👤 Новый пользователь зарегистрировался!\n"
+            . "Bot: {$botName} (ID: {$botId})\n"
+            . "User: {$telegramId} (@{$username})\n"
+            . "Event: {$event}";
+
+        TelegramNotifier::sendMessage($botToken, $adminGroupId, $adminMsg);
     }
 
     /**
@@ -386,7 +501,7 @@ class ApiController
             [$botId, $telegramId]
         );
 
-        if (!empty($user) && in_array($user[0]['status'], ['registered', 'deposited'], true)) {
+        if (!empty($user) && in_array($user[0]['status'], [UserStatus::REGISTERED, UserStatus::DEPOSITED], true)) {
             echo json_encode(['access' => true]);
             return;
         }
@@ -410,9 +525,8 @@ class ApiController
      *
      * Returns empty string if no translation found.
      */
-    private function getTranslation(\Base $f3, int $botId, string $key, string $lang): string
+    private function getTranslation(\DB\SQL $db, int $botId, string $key, string $lang): string
     {
-        $db = $f3->get('DB');
         $rows = $db->exec(
             "SELECT value FROM translations
              WHERE `key` = ? AND lang_code = ? AND bot_id = ?

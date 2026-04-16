@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from constants import UserStatus
 from db import Database
 from i18n import TranslationService
 from notifier import AdminNotifier
@@ -321,10 +322,10 @@ def build_router() -> Router:
 
         # Map audience
         status_filter = None
-        if choice == "registered":
-            status_filter = "registered"
-        elif choice == "deposited":
-            status_filter = "deposited"
+        if choice == UserStatus.REGISTERED:
+            status_filter = UserStatus.REGISTERED
+        elif choice == UserStatus.DEPOSITED:
+            status_filter = UserStatus.DEPOSITED
 
         users = db.get_users_by_status(status_filter)
         user_count = len(users)

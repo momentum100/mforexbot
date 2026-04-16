@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db import Database
 from i18n import TranslationService
 from notifier import AdminNotifier
+from handlers.channel_gate import check_channel_subscription, show_channel_gate
 
 logger = logging.getLogger(__name__)
 
@@ -88,50 +89,15 @@ def build_router() -> Router:
 
         lang = user["lang_code"]
 
-        # Channel check (same logic as /start)
-        channel = bot_config.get("linked_channel")
-        chat_id = bot_config.get("linked_channel_id") or channel
-        if chat_id:
-            try:
-                member = await bot.get_chat_member(chat_id=chat_id, user_id=telegram_id)
-                if member.status not in ("member", "administrator", "creator"):
-                    channel_url = channel if channel and channel.startswith("http") else f"https://t.me/{(channel or '').lstrip('@')}"
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text=i18n.t("channel.btn_subscribe", lang),
-                            callback_data="noop",
-                            url=channel_url,
-                        )],
-                        [InlineKeyboardButton(
-                            text=i18n.t("channel.btn_check", lang),
-                            callback_data="check_subscription",
-                        )],
-                    ])
-                    try:
-                        await callback.message.edit_text(
-                            text=i18n.t("channel.required", lang),
-                            reply_markup=kb,
-                        )
-                    except Exception:
-                        await callback.message.answer(
-                            text=i18n.t("channel.required", lang),
-                            reply_markup=kb,
-                        )
-                    return
-            except Exception as e:
-                logger.error("Channel check failed: %s", e)
-                await notifier.notify(
-                    f"Bot lacks admin permissions in channel {chat_id}: {e}",
-                    level="warning",
-                )
-                # Block user with error per docs
-                try:
-                    await callback.message.edit_text(
-                        text=i18n.t("channel.required", lang),
-                    )
-                except Exception:
-                    pass
-                return
+        # Channel subscription check (shared with /start flow).
+        sub_result = await check_channel_subscription(
+            bot, db, i18n, notifier, bot_config, telegram_id, lang,
+        )
+        if sub_result is False:
+            # Replace the language picker with the channel gate in place
+            # (show_channel_gate tries edit_text first for CallbackQuery).
+            await show_channel_gate(callback, i18n, bot_config.get("linked_channel") or "", lang)
+            return
 
         # Registration gate
         from handlers.start import _pass_registration_gate, _show_main_menu

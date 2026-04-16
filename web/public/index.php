@@ -110,21 +110,21 @@ $f3->route('GET /admin/login', 'App\Controllers\AuthController->loginForm');
 $f3->route('POST /admin/login', 'App\Controllers\AuthController->login');
 $f3->route('GET /admin/logout', 'App\Controllers\AuthController->logout');
 
-$f3->route('GET /admin/bots', 'App\Controllers\AdminController->bots');
-$f3->route('POST /admin/bots', 'App\Controllers\AdminController->saveBots');
+$f3->route('GET /admin/bots', 'App\Controllers\BotsController->bots');
+$f3->route('POST /admin/bots', 'App\Controllers\BotsController->saveBots');
 $f3->route('POST /admin/bots/restart', 'App\Controllers\AdminController->restartBots');
 
-$f3->route('GET /admin/translations', 'App\Controllers\AdminController->translations');
-$f3->route('POST /admin/translations/save', 'App\Controllers\AdminController->saveTranslation');
-$f3->route('POST /admin/translations/delete', 'App\Controllers\AdminController->deleteTranslation');
+$f3->route('GET /admin/translations', 'App\Controllers\TranslationsController->translations');
+$f3->route('POST /admin/translations/save', 'App\Controllers\TranslationsController->saveTranslation');
+$f3->route('POST /admin/translations/delete', 'App\Controllers\TranslationsController->deleteTranslation');
 
-$f3->route('GET /admin/settings', 'App\Controllers\AdminController->settings');
-$f3->route('POST /admin/settings', 'App\Controllers\AdminController->saveSettings');
+$f3->route('GET /admin/settings', 'App\Controllers\SettingsController->settings');
+$f3->route('POST /admin/settings', 'App\Controllers\SettingsController->saveSettings');
 
-$f3->route('GET /admin/users', 'App\Controllers\AdminController->users');
-$f3->route('GET /admin/postbacks', 'App\Controllers\AdminController->postbacks');
-$f3->route('POST /admin/users/@id/delete', 'App\Controllers\AdminController->deleteUser');
-$f3->route('POST /admin/users/@id/toggle-admin', 'App\Controllers\AdminController->toggleUserAdmin');
+$f3->route('GET /admin/users', 'App\Controllers\UsersController->users');
+$f3->route('GET /admin/postbacks', 'App\Controllers\PostbacksController->postbacks');
+$f3->route('POST /admin/users/@id/delete', 'App\Controllers\UsersController->deleteUser');
+$f3->route('POST /admin/users/@id/toggle-admin', 'App\Controllers\UsersController->toggleUserAdmin');
 
 // --- Web App (Telegram Mini App) ---
 $f3->route('GET /app/@bot_id', 'App\Controllers\WebAppController->index');

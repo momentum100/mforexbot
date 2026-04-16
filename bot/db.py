@@ -6,6 +6,8 @@ from typing import Any, Optional
 import mysql.connector
 from mysql.connector import pooling
 
+from constants import UserStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,17 +132,17 @@ class Database:
         )
 
     def set_user_registered(self, telegram_id: int) -> None:
-        """Upgrade user status from 'new' to 'registered'.
+        """Upgrade user status from NEW to REGISTERED.
 
-        Only upgrades — never downgrades from 'deposited'.  Idempotent.
+        Only upgrades — never downgrades from DEPOSITED.  Idempotent.
         """
         self.execute(
             """
             UPDATE users
-            SET status = 'registered', updated_at = NOW()
-            WHERE bot_id = %s AND telegram_id = %s AND status = 'new'
+            SET status = %s, updated_at = NOW()
+            WHERE bot_id = %s AND telegram_id = %s AND status = %s
             """,
-            (self.bot_id, telegram_id),
+            (UserStatus.REGISTERED, self.bot_id, telegram_id, UserStatus.NEW),
         )
 
     def set_password_passed(self, telegram_id: int) -> None:
@@ -178,17 +180,18 @@ class Database:
     def get_users_by_status(self, status_filter: Optional[str] = None) -> list[dict]:
         """Return users for broadcast.
 
-        status_filter: None = all, 'registered' = registered+deposited, 'deposited' = deposited only.
+        status_filter: None = all, REGISTERED = registered+deposited,
+        DEPOSITED = deposited only.
         """
-        if status_filter == "deposited":
+        if status_filter == UserStatus.DEPOSITED:
             return self.fetchall(
-                "SELECT telegram_id FROM users WHERE bot_id = %s AND status = 'deposited'",
-                (self.bot_id,),
+                "SELECT telegram_id FROM users WHERE bot_id = %s AND status = %s",
+                (self.bot_id, UserStatus.DEPOSITED),
             )
-        if status_filter == "registered":
+        if status_filter == UserStatus.REGISTERED:
             return self.fetchall(
-                "SELECT telegram_id FROM users WHERE bot_id = %s AND status IN ('registered', 'deposited')",
-                (self.bot_id,),
+                "SELECT telegram_id FROM users WHERE bot_id = %s AND status IN (%s, %s)",
+                (self.bot_id, UserStatus.REGISTERED, UserStatus.DEPOSITED),
             )
         return self.fetchall(
             "SELECT telegram_id FROM users WHERE bot_id = %s",
@@ -205,15 +208,15 @@ class Database:
 
     def count_users_registered(self) -> int:
         row = self.fetchone(
-            "SELECT COUNT(*) AS cnt FROM users WHERE bot_id = %s AND status IN ('registered', 'deposited')",
-            (self.bot_id,),
+            "SELECT COUNT(*) AS cnt FROM users WHERE bot_id = %s AND status IN (%s, %s)",
+            (self.bot_id, UserStatus.REGISTERED, UserStatus.DEPOSITED),
         )
         return row["cnt"] if row else 0
 
     def count_users_deposited(self) -> int:
         row = self.fetchone(
-            "SELECT COUNT(*) AS cnt FROM users WHERE bot_id = %s AND status = 'deposited'",
-            (self.bot_id,),
+            "SELECT COUNT(*) AS cnt FROM users WHERE bot_id = %s AND status = %s",
+            (self.bot_id, UserStatus.DEPOSITED),
         )
         return row["cnt"] if row else 0
 

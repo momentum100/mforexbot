@@ -6,9 +6,11 @@ from aiogram import Router, types, Bot
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from constants import PostbackEvent
 from db import Database
 from i18n import TranslationService
 from notifier import AdminNotifier
+from handlers.channel_gate import check_channel_subscription, show_channel_gate
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +29,6 @@ def _build_language_keyboard(languages: list[dict]) -> InlineKeyboardMarkup:
     if row:
         buttons.append(row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def _build_channel_keyboard(channel: str, i18n: TranslationService, lang: str) -> InlineKeyboardMarkup:
-    channel_url = channel if channel.startswith("http") else f"https://t.me/{channel.lstrip('@')}"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=i18n.t("channel.btn_subscribe", lang), callback_data="noop", url=channel_url)],
-        [InlineKeyboardButton(text=i18n.t("channel.btn_check", lang), callback_data="check_subscription")],
-    ])
 
 
 def _build_referral_url(bot_config: dict, telegram_id: int) -> str | None:
@@ -84,28 +78,6 @@ def _build_password_only_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=i18n.t("register.btn_enter_password", lang), callback_data="enter_password")],
     ])
-
-
-async def _check_channel_subscription(
-    bot: Bot, db: Database, i18n: TranslationService, notifier: AdminNotifier,
-    bot_config: dict, user_id: int, lang: str,
-) -> bool | None:
-    """Return True if user is subscribed, False if not, None to skip (no channel configured)."""
-    chat_id = bot_config.get("linked_channel_id") or bot_config.get("linked_channel")
-    if not chat_id:
-        return None
-
-    try:
-        member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-        return member.status in ("member", "administrator", "creator")
-    except Exception as e:
-        # Bot likely lacks permissions
-        logger.error("Channel check failed for %s: %s", chat_id, e)
-        await notifier.notify(
-            f"Bot lacks admin permissions in channel {chat_id}. Subscription check failed: {e}",
-            level="warning",
-        )
-        return False  # Block user per docs
 
 
 async def _show_main_menu(
@@ -180,7 +152,7 @@ async def _pass_registration_gate(
     user = db.get_user(telegram_id)
     if user and user.get("password_passed"):
         return True
-    if has_affiliate and db.has_postback_event(telegram_id, "reg"):
+    if has_affiliate and db.has_postback_event(telegram_id, PostbackEvent.REG):
         return True
 
     # Show the correct gate shape.
@@ -260,17 +232,12 @@ def build_router() -> Router:
             return
 
         # Channel subscription check
-        sub_result = await _check_channel_subscription(
+        sub_result = await check_channel_subscription(
             bot, db, i18n, notifier, bot_config, tg_user.id, lang,
         )
         if sub_result is False:
             # Show channel gate
-            channel = bot_config["linked_channel"]
-            kb = _build_channel_keyboard(channel, i18n, lang)
-            await message.answer(
-                text=i18n.t("channel.required", lang),
-                reply_markup=kb,
-            )
+            await show_channel_gate(message, i18n, bot_config["linked_channel"], lang)
             return
 
         # Registration gate
@@ -292,7 +259,7 @@ def build_router() -> Router:
         user = db.get_user(callback.from_user.id)
         lang = user["lang_code"] if user else "en"
 
-        sub_result = await _check_channel_subscription(
+        sub_result = await check_channel_subscription(
             bot, db, i18n, notifier, bot_config, callback.from_user.id, lang,
         )
         if sub_result is True:
@@ -313,7 +280,7 @@ def build_router() -> Router:
         user = db.get_user(callback.from_user.id)
         lang = user["lang_code"] if user else "en"
 
-        if db.has_postback_event(callback.from_user.id, "reg"):
+        if db.has_postback_event(callback.from_user.id, PostbackEvent.REG):
             await callback.answer()
             await _show_main_menu(callback, db, i18n, bot_config, user)
         else:
