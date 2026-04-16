@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Middleware\TelegramAuth;
+use App\Services\TelegramNotifier;
 
 /**
  * API controller for the Telegram Mini Web App and postback endpoint.
@@ -300,6 +301,11 @@ class ApiController
                     $botToken = $bot[0]['token'] ?? '';
                     $supportLink = $bot[0]['support_link'] ?? '';
                     if ($botToken !== '' && $supportLink !== '') {
+                        // Normalize t.me links to @username for display.
+                        if (str_starts_with($supportLink, 'https://t.me/')) {
+                            $supportLink = '@' . ltrim(substr($supportLink, strlen('https://t.me/')), '/');
+                        }
+
                         $userRow = $db->exec(
                             'SELECT lang_code FROM users WHERE bot_id = ? AND telegram_id = ?',
                             [$botId, $telegramId]
@@ -309,13 +315,10 @@ class ApiController
                         $msgText = $this->getTranslation($f3, $botId, 'postback.reg_congrats', $langCode);
                         if ($msgText !== '') {
                             $msgText = str_replace('{support_link}', $supportLink, $msgText);
-                            $url = 'https://api.telegram.org/bot' . $botToken . '/sendMessage';
-                            $payload = [
-                                'chat_id'    => $telegramId,
-                                'text'       => $msgText,
+                            TelegramNotifier::sendMessage($botToken, $telegramId, $msgText, [
                                 'parse_mode' => 'HTML',
-                            ];
-                            @file_get_contents($url . '?' . http_build_query($payload));
+                                'disable_web_page_preview' => true,
+                            ]);
                         }
                     }
                 } catch (\Throwable $e) {
@@ -348,12 +351,7 @@ class ApiController
                         . "User: {$telegramId} (@{$username})\n"
                         . "Event: {$event}";
 
-                    $url = 'https://api.telegram.org/bot' . $botToken . '/sendMessage';
-                    $payload = [
-                        'chat_id' => $adminGroupId,
-                        'text'    => $adminMsg,
-                    ];
-                    @file_get_contents($url . '?' . http_build_query($payload));
+                    TelegramNotifier::sendMessage($botToken, $adminGroupId, $adminMsg);
                 }
             } catch (\Throwable $e) {
                 error_log('Admin group notification failed: ' . $e->getMessage());
