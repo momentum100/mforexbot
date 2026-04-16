@@ -13,7 +13,15 @@ use App\Middleware\TelegramAuth;
  *   POST /app/{bot_id}/api/signal
  *
  * Postback endpoint (requires bot postback_secret):
- *   GET  /postback?user_id=X&status=registered|deposited&bot_id=X&secret=X
+ *   GET  /postback?bot_id=X&user_id=X&event=reg|ftd|redep|commission|withdrawal&secret=X
+ *
+ *   Canonical param names: bot_id, user_id, event, secret.
+ *   Legacy aliases accepted for backwards compatibility:
+ *     - site_id  -> bot_id   (partner's {site_id} macro)
+ *     - click_id -> user_id  (partner's {sub_id1} / legacy {click_id} macro)
+ *     - status   -> event    (legacy status param)
+ *   Priority order (first non-empty wins): bot_id > site_id, user_id > click_id.
+ *   See docs/postbacks.md for the full macro mapping.
  */
 class ApiController
 {
@@ -110,6 +118,34 @@ class ApiController
     }
 
     /**
+     * Check whether the spot forex market is currently open.
+     * Open: Sunday 22:00 UTC -> Friday 22:00 UTC (continuous).
+     */
+    public static function isForexMarketOpen(): bool
+    {
+        $now = new \DateTime('now', new \DateTimeZone('UTC'));
+        $dow = (int) $now->format('w'); // 0=Sun ... 6=Sat
+        $hour = (int) $now->format('G');
+
+        if ($dow === 6) return false;                    // Saturday
+        if ($dow === 0 && $hour < 22) return false;      // Sunday before 22:00
+        if ($dow === 5 && $hour >= 22) return false;     // Friday after 22:00
+        return true;
+    }
+
+    /**
+     * GET /app/{bot_id}/api/market-status
+     * Returns: { "forex_open": bool, "server_time_utc": "..." }
+     */
+    public function marketStatus(\Base $f3): void
+    {
+        echo json_encode([
+            'forex_open' => self::isForexMarketOpen(),
+            'server_time_utc' => gmdate('c'),
+        ]);
+    }
+
+    /**
      * Generate a trading signal (STUB: random values).
      *
      * POST /app/{bot_id}/api/signal
@@ -138,6 +174,12 @@ class ApiController
             return;
         }
 
+        // Block forex signals when the spot market is closed (weekend).
+        if ($type === 'forex' && !self::isForexMarketOpen()) {
+            echo json_encode(['error' => 'forex_market_closed']);
+            return;
+        }
+
         // STUB: Generate random signal
         $directions = ['buy', 'sell'];
         $confidences = ['low', 'medium', 'high'];
@@ -158,91 +200,106 @@ class ApiController
     /**
      * Postback endpoint for affiliate status updates.
      *
-     * GET /postback?user_id=X&status=registered|deposited&bot_id=X&secret=X
-     * Returns: 200 OK on success, 401 on bad secret, 404 on user not found
+     * Partner auto-appends click_id (=telegram_id) and sub_id1 (=bot_id).
+     * Explicit params in URL: secret, event (or status).
+     *
+     * Resolution priority:
+     *   telegram_id: click_id → user_id (first non-empty)
+     *   bot_id:      sub_id1 → bot_id → site_id (first non-empty non-zero)
+     *   event:       event → status (first non-empty)
+     *
+     * Returns: 200 on success, 400 on missing params, 401 on bad secret,
+     * 404 on unknown bot. Every request is logged to postback_events
+     * regardless of outcome — see docs/postbacks.md.
      */
     public function postback(\Base $f3): void
     {
-        $userId = $f3->get('GET.user_id');
-        $status = $f3->get('GET.status');
-        $botId = (int) ($f3->get('GET.bot_id') ?? 0);
-        $secret = $f3->get('GET.secret') ?? '';
+        $params = $f3->get('GET') ?? [];
+        unset($params['secret']); // never log the secret
 
-        // Validate required parameters
-        if (!$userId || !$status || !$botId) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Missing required parameters: user_id, status, bot_id']);
-            return;
-        }
+        // bot_id: sub_id1 (partner auto-appended) → bot_id → site_id
+        $botIdRaw = $this->firstNonEmpty(
+            $f3->get('GET.sub_id1'),
+            $f3->get('GET.bot_id'),
+            $f3->get('GET.site_id')
+        );
+        $botId = (is_numeric($botIdRaw) && (int) $botIdRaw > 0) ? (int) $botIdRaw : null;
 
-        // Validate status value
-        if (!in_array($status, ['registered', 'deposited'], true)) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Invalid status. Must be "registered" or "deposited".']);
-            return;
-        }
+        // telegram_id: click_id (partner auto-appended) → user_id
+        $clickId = $this->firstNonEmpty(
+            $f3->get('GET.click_id'),
+            $f3->get('GET.user_id')
+        );
+
+        $event = trim((string) ($this->firstNonEmpty(
+            $f3->get('GET.event'),
+            $f3->get('GET.status')
+        ) ?? ''));
+        $secret   = (string) ($f3->get('GET.secret') ?? '');
+        $telegramId = (is_numeric($clickId) && (int) $clickId > 0) ? (int) $clickId : null;
+
+        $rawQuery = (string) ($_SERVER['QUERY_STRING'] ?? '');
+        $rawQuery = preg_replace('/(^|&)secret=[^&]*/', '$1secret=REDACTED', $rawQuery);
+
+        // Classify request so we can log it and still return an accurate status.
+        $authStatus = 'ok';
+        $httpCode   = 200;
+        $response   = ['ok' => true];
 
         $db = $f3->get('DB');
 
-        // Look up bot and validate secret
-        $bot = $db->exec(
-            'SELECT id, postback_secret FROM bots WHERE id = ?',
-            [$botId]
-        );
-
-        if (empty($bot)) {
-            http_response_code(404);
-            echo json_encode(['error' => 'Bot not found']);
-            return;
+        if ($botId === null || $event === '') {
+            $authStatus = 'missing_params';
+            $httpCode   = 400;
+            $response   = ['error' => 'Missing required parameters: bot_id (sub_id1/bot_id/site_id), event'];
+        } else {
+            $bot = $db->exec('SELECT id, postback_secret FROM bots WHERE id = ?', [$botId]);
+            if (empty($bot)) {
+                $authStatus = 'unknown_bot';
+                $httpCode   = 404;
+                $response   = ['error' => 'Bot not found'];
+                // Keep bot_id for the log row even though FK will reject — store NULL to allow insert.
+                $botIdForLog = null;
+            } else {
+                $expectedSecret = $bot[0]['postback_secret'] ?? '';
+                if ($expectedSecret === '' || !hash_equals($expectedSecret, $secret)) {
+                    $authStatus = 'bad_secret';
+                    $httpCode   = 401;
+                    $response   = ['error' => 'Invalid secret'];
+                }
+                $botIdForLog = $botId;
+            }
         }
 
-        $expectedSecret = $bot[0]['postback_secret'] ?? '';
-        if ($expectedSecret === '' || !hash_equals($expectedSecret, $secret)) {
-            http_response_code(401);
-            echo json_encode(['error' => 'Invalid secret']);
-            return;
-        }
-
-        // Find the user by telegram_id + bot_id
-        $user = $db->exec(
-            'SELECT id, status FROM users WHERE telegram_id = ? AND bot_id = ?',
-            [$userId, $botId]
-        );
-
-        if (empty($user)) {
-            http_response_code(404);
-            echo json_encode(['error' => 'User not found']);
-            return;
-        }
-
-        // Only allow forward progression: new -> registered -> deposited
-        $currentStatus = $user[0]['status'];
-        $statusOrder = ['new' => 0, 'registered' => 1, 'deposited' => 2];
-        $currentOrder = $statusOrder[$currentStatus] ?? 0;
-        $newOrder = $statusOrder[$status] ?? 0;
-
-        if ($newOrder <= $currentOrder) {
-            // Status is same or lower — no-op but return success
-            echo json_encode(['ok' => true, 'message' => 'Status unchanged (already at same or higher level)']);
-            return;
-        }
-
-        // Update user status
+        // Log EVERY request (accepted or not) for debugging.
         $db->exec(
-            'UPDATE users SET status = ?, updated_at = NOW() WHERE telegram_id = ? AND bot_id = ?',
-            [$status, $userId, $botId]
+            'INSERT INTO postback_events (bot_id, telegram_id, event_type, auth_status, params_json, raw_query, ip)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [
+                $botIdForLog ?? $botId,
+                $telegramId,
+                $event !== '' ? $event : null,
+                $authStatus,
+                json_encode($params, JSON_UNESCAPED_UNICODE),
+                $rawQuery,
+                $f3->get('IP'),
+            ]
         );
 
-        // Log the postback for audit
-        error_log(sprintf(
-            'POSTBACK: bot_id=%d user_id=%s status=%s (was: %s) ip=%s',
-            $botId,
-            $userId,
-            $status,
-            $currentStatus,
-            $f3->get('IP')
-        ));
+        http_response_code($httpCode);
+        echo json_encode($response);
+    }
 
-        echo json_encode(['ok' => true, 'message' => 'Status updated to ' . $status]);
+    /**
+     * Return the first non-null, non-empty-string, non-zero value.
+     */
+    private function firstNonEmpty(mixed ...$values): mixed
+    {
+        foreach ($values as $v) {
+            if ($v !== null && $v !== '' && $v !== '0' && $v !== 0) {
+                return $v;
+            }
+        }
+        return null;
     }
 }
