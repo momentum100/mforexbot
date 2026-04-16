@@ -316,12 +316,14 @@
                 // No Telegram context (dev mode) — allow access
                 document.getElementById('main-content').style.display = '';
                 document.getElementById('access-denied-stub').classList.remove('visible');
+                loadPairs();
                 return;
             }
             apiGet('/check-access?tg_id=' + tgId).then(function(data) {
                 if (data.access) {
                     document.getElementById('main-content').style.display = '';
                     document.getElementById('access-denied-stub').classList.remove('visible');
+                    loadPairs();
                 } else {
                     accessSupportLink = data.support_link || null;
                     document.getElementById('main-content').style.display = 'none';
@@ -336,7 +338,7 @@
 
         // Hide main content initially until access is confirmed
         document.getElementById('main-content').style.display = 'none';
-        checkAccess();
+        var accessChecked = false;
 
         // ----------------------------------------------------------------
         // Translations
@@ -375,7 +377,18 @@
                 if (document.getElementById('access-denied-stub').classList.contains('visible')) {
                     applyAccessDeniedTranslations(accessSupportLink);
                 }
-            }).catch(function() { /* use fallbacks */ });
+                // Run access check after translations are ready (first load only)
+                if (!accessChecked) {
+                    accessChecked = true;
+                    checkAccess();
+                }
+            }).catch(function() {
+                // Even on translation failure, still check access
+                if (!accessChecked) {
+                    accessChecked = true;
+                    checkAccess();
+                }
+            });
         }
 
         // ----------------------------------------------------------------
@@ -612,7 +625,6 @@
         // Initial load
         // ----------------------------------------------------------------
         loadTranslations(currentLang);
-        loadPairs();
         updateMarketStatusUI();
         setInterval(updateMarketStatusUI, 60000);
     </script>
