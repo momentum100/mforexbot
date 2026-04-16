@@ -6,7 +6,6 @@ services:
     volumes:
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./web:/var/www/html
-      - ./webapp:/var/www/html/webapp
     depends_on:
       - php-fpm
     networks:
@@ -19,7 +18,6 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./web:/var/www/html
-      - ./webapp:/var/www/html/webapp
       - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
     environment:
       DB_HOST: ${DB_HOST}
