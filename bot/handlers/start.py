@@ -3,7 +3,7 @@
 import logging
 
 from aiogram import Router, types, Bot
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from db import Database
@@ -11,7 +11,6 @@ from i18n import TranslationService
 from notifier import AdminNotifier
 
 logger = logging.getLogger(__name__)
-router = Router(name="start")
 
 
 def _build_language_keyboard(languages: list[dict]) -> InlineKeyboardMarkup:
@@ -38,23 +37,72 @@ def _build_channel_keyboard(channel: str, i18n: TranslationService, lang: str) -
     ])
 
 
+def _build_referral_url(bot_config: dict, telegram_id: int) -> str | None:
+    """Substitute {user_id} -> telegram_id, {bot_id} -> bot_id into the stored template."""
+    template = bot_config.get("referral_url_template")
+    if not template:
+        return None
+    return (
+        template
+        .replace("{user_id}", str(telegram_id))
+        .replace("{bot_id}", str(bot_config["id"]))
+    )
+
+
+def _build_register_keyboard(ref_url: str, i18n: TranslationService, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=i18n.t("register.btn_register", lang), callback_data="noop", url=ref_url)],
+        [InlineKeyboardButton(text=i18n.t("register.btn_check", lang), callback_data="check_registration")],
+    ])
+
+
+def _build_combined_gate_keyboard(
+    ref_url: str, i18n: TranslationService, lang: str,
+) -> InlineKeyboardMarkup:
+    """Combined gate: affiliate register + "enter access code" button.
+
+    Used when bot has BOTH `referral_url_template` and `access_password`.
+    Tapping the bottom button enters the password FSM (see
+    handlers/password_gate.py).
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=i18n.t("register.btn_register", lang), callback_data="noop", url=ref_url)],
+        [InlineKeyboardButton(text=i18n.t("register.btn_check", lang), callback_data="check_registration")],
+        [InlineKeyboardButton(text=i18n.t("register.btn_enter_password", lang), callback_data="enter_password")],
+    ])
+
+
+def _build_password_only_keyboard(
+    i18n: TranslationService, lang: str,
+) -> InlineKeyboardMarkup:
+    """Standalone password gate (Screen 1c) initial keyboard.
+
+    Single button — tapping it enters the password FSM. We use the same
+    `enter_password` callback as the combined gate so password_gate.py only
+    has to know one entry point.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=i18n.t("register.btn_enter_password", lang), callback_data="enter_password")],
+    ])
+
+
 async def _check_channel_subscription(
     bot: Bot, db: Database, i18n: TranslationService, notifier: AdminNotifier,
     bot_config: dict, user_id: int, lang: str,
 ) -> bool | None:
     """Return True if user is subscribed, False if not, None to skip (no channel configured)."""
-    channel = bot_config.get("linked_channel")
-    if not channel:
+    chat_id = bot_config.get("linked_channel_id") or bot_config.get("linked_channel")
+    if not chat_id:
         return None
 
     try:
-        member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+        member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         return member.status in ("member", "administrator", "creator")
     except Exception as e:
         # Bot likely lacks permissions
-        logger.error("Channel check failed for %s: %s", channel, e)
+        logger.error("Channel check failed for %s: %s", chat_id, e)
         await notifier.notify(
-            f"Bot lacks admin permissions in channel {channel}. Subscription check failed: {e}",
+            f"Bot lacks admin permissions in channel {chat_id}. Subscription check failed: {e}",
             level="warning",
         )
         return False  # Block user per docs
@@ -70,6 +118,9 @@ async def _show_main_menu(
     """Send main menu (Screen 2) with banner image."""
     from handlers.menu import build_main_menu_keyboard
     from images_helper import get_image
+
+    # Mark user as registered (idempotent, only upgrades 'new' → 'registered')
+    db.set_user_registered(user["telegram_id"])
 
     lang = user["lang_code"]
     text = i18n.t("main_menu.title", lang)
@@ -91,84 +142,181 @@ async def _show_main_menu(
         await msg.answer(text=text, reply_markup=kb)
 
 
-@router.message(CommandStart())
-async def cmd_start(
-    message: types.Message,
-    bot: Bot,
+async def _pass_registration_gate(
+    target: types.Message | types.CallbackQuery,
     db: Database,
     i18n: TranslationService,
-    notifier: AdminNotifier,
     bot_config: dict,
-):
-    tg_user = message.from_user
-    # Detect language from Telegram client
-    tg_lang = (tg_user.language_code or "")[:2].lower()
-    supported = db.get_language_codes()
+    telegram_id: int,
+    lang: str,
+) -> bool:
+    """Apply the post-channel gate (Screen 1b / 1c / combined).
 
-    # Check if user already exists (returning user)
-    existing = db.get_user(tg_user.id)
+    Returns True if the user has already passed the gate (or no gate is
+    configured). Otherwise sends the appropriate gate UI and returns False.
 
-    if existing:
-        lang = existing["lang_code"]
-    elif tg_lang in supported:
-        lang = tg_lang
+    Resolution (matches docs/bot-flow.md → "Gate selection logic"):
+
+      has_password = bool(bot_config.access_password)
+      has_affiliate = bool(bot_config.referral_url_template)
+      passed = users.password_passed OR has_reg_postback(user)
+
+      - neither set       → no gate, pass
+      - already passed    → pass
+      - both set          → combined gate (Screen 1b layout + password button)
+      - affiliate only    → Screen 1b (affiliate-only postback gate)
+      - password only     → Screen 1c (standalone password gate)
+    """
+    access_password = (bot_config.get("access_password") or "").strip()
+    has_password = bool(access_password)
+    ref_url = _build_referral_url(bot_config, telegram_id)
+    has_affiliate = bool(ref_url)
+
+    # No gate configured at all.
+    if not has_password and not has_affiliate:
+        return True
+
+    # Already passed by either path.
+    user = db.get_user(telegram_id)
+    if user and user.get("password_passed"):
+        return True
+    if has_affiliate and db.has_postback_event(telegram_id, "reg"):
+        return True
+
+    # Show the correct gate shape.
+    msg = target.message if isinstance(target, types.CallbackQuery) else target
+
+    if has_affiliate and has_password:
+        text = i18n.t("register.combined_required", lang)
+        kb = _build_combined_gate_keyboard(ref_url, i18n, lang)
+    elif has_affiliate:
+        text = i18n.t("register.required", lang)
+        kb = _build_register_keyboard(ref_url, i18n, lang)
     else:
-        lang = None  # will show language picker
+        # Password-only (standalone Screen 1c).
+        text = i18n.t("password.required", lang)
+        kb = _build_password_only_keyboard(i18n, lang)
 
-    # Upsert user with detected or default lang
-    user = db.upsert_user(
-        telegram_id=tg_user.id,
-        username=tg_user.username,
-        first_name=tg_user.first_name,
-        last_name=tg_user.last_name,
-        lang_code=lang or "en",
-    )
+    if isinstance(target, types.CallbackQuery):
+        try:
+            await target.message.delete()
+        except Exception:
+            pass
+    await msg.answer(text=text, reply_markup=kb)
+    return False
 
-    # If language unknown -> show picker
-    if lang is None:
-        languages = db.get_languages()
-        kb = _build_language_keyboard(languages)
-        await message.answer(
-            text=i18n.t("lang_select.title", "en"),
-            reply_markup=kb,
+
+def build_router() -> Router:
+    """Build a fresh Router with all start-flow handlers bound to it.
+
+    aiogram 3 Router instances are stateful (they track parent Dispatcher)
+    and cannot be reused across dispatchers, so each bot/Dispatcher needs
+    its own fresh Router. Call this once per Dispatcher.
+    """
+    router = Router(name="start")
+
+    @router.message(CommandStart())
+    async def cmd_start(
+        message: types.Message,
+        command: CommandObject,
+        bot: Bot,
+        db: Database,
+        i18n: TranslationService,
+        notifier: AdminNotifier,
+        bot_config: dict,
+    ):
+        tg_user = message.from_user
+        start_param = (command.args or "").strip()
+
+        # Check if user already exists (returning user)
+        existing = db.get_user(tg_user.id)
+
+        if existing:
+            lang = existing["lang_code"]
+        else:
+            lang = None  # new user -> always show language picker
+
+        # Upsert user with detected or default lang
+        user = db.upsert_user(
+            telegram_id=tg_user.id,
+            username=tg_user.username,
+            first_name=tg_user.first_name,
+            last_name=tg_user.last_name,
+            lang_code=lang or "en",
         )
-        return
 
-    # Channel subscription check
-    sub_result = await _check_channel_subscription(
-        bot, db, i18n, notifier, bot_config, tg_user.id, lang,
-    )
-    if sub_result is False:
-        # Show channel gate
-        channel = bot_config["linked_channel"]
-        kb = _build_channel_keyboard(channel, i18n, lang)
-        await message.answer(
-            text=i18n.t("channel.required", lang),
-            reply_markup=kb,
+        # Capture start_param on first /start only (idempotent)
+        if start_param:
+            db.set_start_param_if_empty(tg_user.id, start_param)
+
+        # If language unknown -> show picker
+        if lang is None:
+            languages = db.get_languages()
+            kb = _build_language_keyboard(languages)
+            await message.answer(
+                text=i18n.t("lang_select.title", "en"),
+                reply_markup=kb,
+            )
+            return
+
+        # Channel subscription check
+        sub_result = await _check_channel_subscription(
+            bot, db, i18n, notifier, bot_config, tg_user.id, lang,
         )
-        return
+        if sub_result is False:
+            # Show channel gate
+            channel = bot_config["linked_channel"]
+            kb = _build_channel_keyboard(channel, i18n, lang)
+            await message.answer(
+                text=i18n.t("channel.required", lang),
+                reply_markup=kb,
+            )
+            return
 
-    # Show main menu
-    await _show_main_menu(message, db, i18n, bot_config, user)
+        # Registration gate
+        if not await _pass_registration_gate(message, db, i18n, bot_config, tg_user.id, lang):
+            return
 
+        # Show main menu
+        await _show_main_menu(message, db, i18n, bot_config, user)
 
-@router.callback_query(lambda c: c.data == "check_subscription")
-async def cb_check_subscription(
-    callback: types.CallbackQuery,
-    bot: Bot,
-    db: Database,
-    i18n: TranslationService,
-    notifier: AdminNotifier,
-    bot_config: dict,
-):
-    await callback.answer()
-    user = db.get_user(callback.from_user.id)
-    lang = user["lang_code"] if user else "en"
+    @router.callback_query(lambda c: c.data == "check_subscription")
+    async def cb_check_subscription(
+        callback: types.CallbackQuery,
+        bot: Bot,
+        db: Database,
+        i18n: TranslationService,
+        notifier: AdminNotifier,
+        bot_config: dict,
+    ):
+        user = db.get_user(callback.from_user.id)
+        lang = user["lang_code"] if user else "en"
 
-    sub_result = await _check_channel_subscription(
-        bot, db, i18n, notifier, bot_config, callback.from_user.id, lang,
-    )
-    if sub_result is True:
-        await _show_main_menu(callback, db, i18n, bot_config, user)
-    else:
-        await callback.answer(i18n.t("channel.not_subscribed", lang), show_alert=True)
+        sub_result = await _check_channel_subscription(
+            bot, db, i18n, notifier, bot_config, callback.from_user.id, lang,
+        )
+        if sub_result is True:
+            await callback.answer()
+            if not await _pass_registration_gate(callback, db, i18n, bot_config, callback.from_user.id, lang):
+                return
+            await _show_main_menu(callback, db, i18n, bot_config, user)
+        else:
+            await callback.answer(i18n.t("channel.not_subscribed", lang), show_alert=True)
+
+    @router.callback_query(lambda c: c.data == "check_registration")
+    async def cb_check_registration(
+        callback: types.CallbackQuery,
+        db: Database,
+        i18n: TranslationService,
+        bot_config: dict,
+    ):
+        user = db.get_user(callback.from_user.id)
+        lang = user["lang_code"] if user else "en"
+
+        if db.has_postback_event(callback.from_user.id, "reg"):
+            await callback.answer()
+            await _show_main_menu(callback, db, i18n, bot_config, user)
+        else:
+            await callback.answer(i18n.t("register.not_yet", lang), show_alert=True)
+
+    return router

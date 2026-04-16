@@ -47,7 +47,7 @@ services:
       DB_NAME: ${DB_NAME}
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: python main.py --bot-id=1
+    command: python launcher.py
     networks:
       - app-network
     restart: unless-stopped

@@ -7,8 +7,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from db import Database
 from i18n import TranslationService
 
-router = Router(name="menu")
-
 
 def build_main_menu_keyboard(
     i18n: TranslationService,
@@ -63,74 +61,82 @@ def build_main_menu_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.callback_query(lambda c: c.data == "menu:main")
-async def cb_main_menu(
-    callback: types.CallbackQuery,
-    db: Database,
-    i18n: TranslationService,
-    bot_config: dict,
-):
-    """Return to main menu from any sub-screen."""
-    await callback.answer()
-    user = db.get_user(callback.from_user.id)
-    if not user:
-        return
-    lang = user["lang_code"]
-    text = i18n.t("main_menu.title", lang)
-    kb = build_main_menu_keyboard(i18n, lang, bot_config, user)
+def build_router() -> Router:
+    """Build a fresh Router with all menu handlers bound to it.
 
-    from images_helper import get_image
-    image = get_image("main_menu", lang)
+    Must be called once per Dispatcher (aiogram 3 Router instances cannot
+    be attached to more than one Dispatcher).
+    """
+    router = Router(name="menu")
 
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
+    @router.callback_query(lambda c: c.data == "menu:main")
+    async def cb_main_menu(
+        callback: types.CallbackQuery,
+        db: Database,
+        i18n: TranslationService,
+        bot_config: dict,
+    ):
+        """Return to main menu from any sub-screen."""
+        await callback.answer()
+        user = db.get_user(callback.from_user.id)
+        if not user:
+            return
+        lang = user["lang_code"]
+        text = i18n.t("main_menu.title", lang)
+        kb = build_main_menu_keyboard(i18n, lang, bot_config, user)
 
-    if image:
-        await callback.message.answer_photo(photo=image, caption=text, reply_markup=kb)
-    else:
-        await callback.message.answer(text=text, reply_markup=kb)
+        from images_helper import get_image
+        image = get_image("main_menu", lang)
 
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
 
-@router.message(Command("support"))
-async def cmd_support(
-    message: types.Message,
-    db: Database,
-    i18n: TranslationService,
-    bot_config: dict,
-):
-    """Handle /support command -- send support link."""
-    user = db.get_user(message.from_user.id)
-    lang = user["lang_code"] if user else "en"
-    support_link = bot_config.get("support_link")
-    if support_link:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=i18n.t("main_menu.btn_support", lang), url=support_link)],
-        ])
-        await message.answer(text=i18n.t("main_menu.btn_support", lang), reply_markup=kb)
-    else:
-        await message.answer(text=i18n.t("main_menu.btn_support", lang))
+        if image:
+            await callback.message.answer_photo(photo=image, caption=text, reply_markup=kb)
+        else:
+            await callback.message.answer(text=text, reply_markup=kb)
 
+    @router.message(Command("support"))
+    async def cmd_support(
+        message: types.Message,
+        db: Database,
+        i18n: TranslationService,
+        bot_config: dict,
+    ):
+        """Handle /support command -- send support link."""
+        user = db.get_user(message.from_user.id)
+        lang = user["lang_code"] if user else "en"
+        support_link = bot_config.get("support_link")
+        if support_link:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=i18n.t("main_menu.btn_support", lang), url=support_link)],
+            ])
+            await message.answer(text=i18n.t("main_menu.btn_support", lang), reply_markup=kb)
+        else:
+            await message.answer(text=i18n.t("main_menu.btn_support", lang))
 
-@router.message(Command("signal"))
-async def cmd_signal(
-    message: types.Message,
-    db: Database,
-    i18n: TranslationService,
-    bot_config: dict,
-):
-    """Handle /signal command -- open web app."""
-    user = db.get_user(message.from_user.id)
-    lang = user["lang_code"] if user else "en"
-    webapp_url = bot_config.get("webapp_url")
-    if webapp_url:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text=i18n.t("main_menu.btn_signal", lang),
-                web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={bot_config['id']}"),
-            )],
-        ])
-        await message.answer(text=i18n.t("main_menu.btn_signal", lang), reply_markup=kb)
-    else:
-        await message.answer(text=i18n.t("main_menu.btn_signal", lang))
+    @router.message(Command("signal"))
+    async def cmd_signal(
+        message: types.Message,
+        db: Database,
+        i18n: TranslationService,
+        bot_config: dict,
+    ):
+        """Handle /signal command -- open web app."""
+        user = db.get_user(message.from_user.id)
+        lang = user["lang_code"] if user else "en"
+        webapp_url = bot_config.get("webapp_url")
+        if webapp_url:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=i18n.t("main_menu.btn_signal", lang),
+                    web_app=WebAppInfo(url=f"{webapp_url}?lang={lang}&bot_id={bot_config['id']}"),
+                )],
+            ])
+            await message.answer(text=i18n.t("main_menu.btn_signal", lang), reply_markup=kb)
+        else:
+            await message.answer(text=i18n.t("main_menu.btn_signal", lang))
+
+    return router

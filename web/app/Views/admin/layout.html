@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ @page_title }} — Admin — M-Bot-Forex</title>
+    <title>{{ @page_title }} — Админка — M-Bot-Forex</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -153,6 +153,12 @@
             align-items: center;
             flex-wrap: wrap;
         }
+        img.emoji {
+            height: 1em;
+            width: 1em;
+            margin: 0 0.05em 0 0.1em;
+            vertical-align: -0.1em;
+        }
     </style>
 </head>
 <body>
@@ -160,13 +166,16 @@
         <div style="display:flex;align-items:center;">
             <div class="brand">M-Bot<span>Forex</span></div>
             <nav>
-                <a href="/admin/bots" class="{{ @page_title=='Bots'?'active':'' }}">Bots</a>
-                <a href="/admin/translations" class="{{ @page_title=='Translations'?'active':'' }}">Translations</a>
+                <a href="/admin/bots" class="{{ @page_title=='Bots'?'active':'' }}">Боты</a>
+                <a href="/admin/users" class="{{ @page_title=='Users'?'active':'' }}">👥 Пользователи</a>
+                <a href="/admin/postbacks" class="{{ @page_title=='Postbacks'?'active':'' }}">Постбеки</a>
+                <a href="/admin/translations" class="{{ @page_title=='Translations'?'active':'' }}">Переводы</a>
+                <a href="/admin/settings" class="{{ @page_title=='Settings'?'active':'' }}">⚙ Настройки</a>
             </nav>
         </div>
         <div class="user-info">
             {{ @admin_username }}
-            <a href="/admin/logout">Logout</a>
+            <a href="/admin/logout">Выйти</a>
         </div>
     </div>
     <div class="content">

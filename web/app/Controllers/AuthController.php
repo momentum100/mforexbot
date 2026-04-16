@@ -54,7 +54,7 @@ class AuthController
         // CSRF check
         $token = $f3->get('POST.csrf_token');
         if (empty($token) || !hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
-            $_SESSION['login_error'] = 'Invalid request. Please try again.';
+            $_SESSION['login_error'] = 'Неверный запрос. Попробуйте ещё раз.';
             $f3->reroute('/admin/login');
             return;
         }
@@ -70,7 +70,7 @@ class AuthController
         }
 
         if ($attempts['count'] >= 5) {
-            $_SESSION['login_error'] = 'Too many login attempts. Please wait a minute.';
+            $_SESSION['login_error'] = 'Слишком много попыток входа. Подождите минуту.';
             $f3->reroute('/admin/login');
             return;
         }
@@ -83,7 +83,7 @@ class AuthController
         $password = $f3->get('POST.password') ?? '';
 
         if ($username === '' || $password === '') {
-            $_SESSION['login_error'] = 'Username and password are required.';
+            $_SESSION['login_error'] = 'Логин и пароль обязательны.';
             $f3->reroute('/admin/login');
             return;
         }
@@ -96,7 +96,7 @@ class AuthController
         );
 
         if (empty($result) || !password_verify($password, $result[0]['password'])) {
-            $_SESSION['login_error'] = 'Invalid username or password.';
+            $_SESSION['login_error'] = 'Неверный логин или пароль.';
             $f3->reroute('/admin/login');
             return;
         }

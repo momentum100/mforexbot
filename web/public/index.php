@@ -52,6 +52,9 @@ $db = new \DB\SQL($dsn, $f3->get('DB_USER'), $f3->get('DB_PASS'), [
     \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
     \PDO::ATTR_EMULATE_PREPARES => false,
 ]);
+// F3's \DB\SQL wrapper ignores charset=utf8mb4 in DSN; force it so 4-byte
+// chars (emoji flags in translations) don't come back as '??'.
+$db->exec('SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci');
 $f3->set('DB', $db);
 
 // ---------------------------------------------------------------------------
@@ -79,9 +82,18 @@ ini_set('session.cookie_samesite', 'Strict');
 // Security Headers (all responses)
 // ---------------------------------------------------------------------------
 
-$f3->set('ONREROUTE', function ($url, $permanent) use ($f3) {
+$f3->set('ONREROUTE', function ($url, $permanent) {
     header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
+    if (PHP_SAPI !== 'cli') {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $code = 303;
+        } else {
+            $code = $permanent ? 301 : 302;
+        }
+        header('Location: ' . $url, true, $code);
+    }
+    exit;
 });
 
 header('X-Frame-Options: DENY');
@@ -100,10 +112,19 @@ $f3->route('GET /admin/logout', 'App\Controllers\AuthController->logout');
 
 $f3->route('GET /admin/bots', 'App\Controllers\AdminController->bots');
 $f3->route('POST /admin/bots', 'App\Controllers\AdminController->saveBots');
+$f3->route('POST /admin/bots/restart', 'App\Controllers\AdminController->restartBots');
 
 $f3->route('GET /admin/translations', 'App\Controllers\AdminController->translations');
 $f3->route('POST /admin/translations/save', 'App\Controllers\AdminController->saveTranslation');
 $f3->route('POST /admin/translations/delete', 'App\Controllers\AdminController->deleteTranslation');
+
+$f3->route('GET /admin/settings', 'App\Controllers\AdminController->settings');
+$f3->route('POST /admin/settings', 'App\Controllers\AdminController->saveSettings');
+
+$f3->route('GET /admin/users', 'App\Controllers\AdminController->users');
+$f3->route('GET /admin/postbacks', 'App\Controllers\AdminController->postbacks');
+$f3->route('POST /admin/users/@id/delete', 'App\Controllers\AdminController->deleteUser');
+$f3->route('POST /admin/users/@id/toggle-admin', 'App\Controllers\AdminController->toggleUserAdmin');
 
 // --- Web App (Telegram Mini App) ---
 $f3->route('GET /app/@bot_id', 'App\Controllers\WebAppController->index');
@@ -111,7 +132,9 @@ $f3->route('GET /app/@bot_id', 'App\Controllers\WebAppController->index');
 // --- Web App API ---
 $f3->route('GET /app/@bot_id/api/translations', 'App\Controllers\ApiController->translations');
 $f3->route('GET /app/@bot_id/api/pairs', 'App\Controllers\ApiController->pairs');
+$f3->route('GET /app/@bot_id/api/market-status', 'App\Controllers\ApiController->marketStatus');
 $f3->route('POST /app/@bot_id/api/signal', 'App\Controllers\ApiController->signal');
+$f3->route('GET /app/@bot_id/api/check-access', 'App\Controllers\ApiController->checkAccess');
 
 // --- Postback Route ---
 $f3->route('GET /postback', 'App\Controllers\ApiController->postback');

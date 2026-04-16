@@ -437,8 +437,9 @@ def build_router() -> Router:
             f"{i18n.t('admin.btn_referral', lang)}\n\n"
             f"Current template:\n<code>{template}</code>\n\n"
             f"Example (your ID):\n{example}\n\n"
-            f"Placeholders: <code>{{user_id}}</code> (Telegram ID), "
-            f"<code>{{bot_id}}</code> (this bot's ID, used as partner site_id)."
+            f"Placeholders:\n"
+            f"<code>{{user_id}}</code> — Telegram ID (→ partner click_id)\n"
+            f"<code>{{bot_id}}</code> — bot ID (→ partner sub_id1)"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✏️ Edit", callback_data="admin:referral_edit")],
@@ -465,10 +466,10 @@ def build_router() -> Router:
         text = (
             "Send the new referral URL template.\n"
             "Placeholders:\n"
-            "• <code>{user_id}</code> — Telegram user ID (partner click_id)\n"
-            "• <code>{bot_id}</code> — this bot's ID (partner site_id)\n\n"
+            "• <code>{user_id}</code> — Telegram user ID (→ partner click_id)\n"
+            "• <code>{bot_id}</code> — bot ID (→ partner sub_id1)\n\n"
             "Example:\n"
-            "<code>https://po-ru4.click/smart/XXX?click_id={user_id}&amp;sub_id1={bot_id}</code>"
+            "<code>https://example.com/smart/XXX?click_id={user_id}&amp;sub_id1={bot_id}</code>"
         )
         kb = _cancel_kb(i18n, lang, "referral:cancel")
         try:

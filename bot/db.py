@@ -71,6 +71,12 @@ class Database:
     def get_bot(self) -> Optional[dict]:
         return self.fetchone("SELECT * FROM bots WHERE id = %s", (self.bot_id,))
 
+    def update_referral_url(self, template: str) -> None:
+        self.execute(
+            "UPDATE bots SET referral_url_template = %s, updated_at = NOW() WHERE id = %s",
+            (template, self.bot_id),
+        )
+
     # ------------------------------------------------------------------
     # Users
     # ------------------------------------------------------------------
@@ -106,11 +112,61 @@ class Database:
         )
         return self.get_user(telegram_id)
 
+    def set_start_param_if_empty(self, telegram_id: int, start_param: str) -> None:
+        """Set start_param only if it's currently NULL (first /start capture)."""
+        self.execute(
+            """
+            UPDATE users
+            SET start_param = %s, updated_at = NOW()
+            WHERE bot_id = %s AND telegram_id = %s AND start_param IS NULL
+            """,
+            (start_param, self.bot_id, telegram_id),
+        )
+
     def update_user_lang(self, telegram_id: int, lang_code: str) -> None:
         self.execute(
             "UPDATE users SET lang_code = %s, updated_at = NOW() WHERE bot_id = %s AND telegram_id = %s",
             (lang_code, self.bot_id, telegram_id),
         )
+
+    def set_user_registered(self, telegram_id: int) -> None:
+        """Upgrade user status from 'new' to 'registered'.
+
+        Only upgrades — never downgrades from 'deposited'.  Idempotent.
+        """
+        self.execute(
+            """
+            UPDATE users
+            SET status = 'registered', updated_at = NOW()
+            WHERE bot_id = %s AND telegram_id = %s AND status = 'new'
+            """,
+            (self.bot_id, telegram_id),
+        )
+
+    def set_password_passed(self, telegram_id: int) -> None:
+        """Flag the user as having entered bots.access_password correctly.
+
+        Idempotent — safe to call repeatedly. Scoped by bot_id, so the same
+        Telegram user on a different bot must enter that bot's password
+        separately.
+        """
+        self.execute(
+            """
+            UPDATE users
+            SET password_passed = 1, updated_at = NOW()
+            WHERE bot_id = %s AND telegram_id = %s
+            """,
+            (self.bot_id, telegram_id),
+        )
+
+    def has_postback_event(self, telegram_id: int, event_type: str) -> bool:
+        row = self.fetchone(
+            "SELECT 1 FROM postback_events "
+            "WHERE bot_id = %s AND telegram_id = %s AND event_type = %s AND auth_status = 'ok' "
+            "LIMIT 1",
+            (self.bot_id, telegram_id, event_type),
+        )
+        return row is not None
 
     def get_admin_ids(self) -> list[int]:
         rows = self.fetchall(

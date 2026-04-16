@@ -86,8 +86,8 @@
                 <input type="text" name="support_link" id="bot-support-link" style="width:100%;" placeholder="https://t.me/support">
             </div>
             <div>
-                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Шаблон реферальной ссылки</label>
-                <input type="text" name="referral_url_template" id="bot-referral-url" style="width:100%;" placeholder="https://partner.example/smart/XXX?sub_id1={user_id}&site_id={bot_id}">
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Реферальная ссылка</label>
+                <input type="text" name="referral_url_template" id="bot-referral-url" style="width:100%;" placeholder="https://example.com/smart/XXX?click_id={user_id}&sub_id1={bot_id}">
             </div>
             <div>
                 <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Postback secret</label>
@@ -166,16 +166,11 @@
         }
 
         // Canonical postback URL format (see docs/postbacks.md):
-        //   /postback?bot_id=<id>&user_id={sub_id1}&event=reg&secret=<secret>
-        // - bot_id is hardcoded to the numeric id (fast/unambiguous variant).
-        // - user_id is left as the partner macro {sub_id1} — the partner
-        //   cabinet expands it on their side to the telegram_id we sent in
-        //   the referral link's sub_id1 capture field.
+        // Partner auto-appends click_id (tg_id) and sub_id1 (bot_id).
+        // We only need secret and event in the URL.
         var url = baseUrl +
-            '/postback?bot_id=' + encodeURIComponent(botId) +
-            '&user_id={sub_id1}' +
-            '&event=reg' +
-            '&secret=' + encodeURIComponent(secret);
+            '/postback?secret=' + encodeURIComponent(secret) +
+            '&event=reg';
 
         el.innerHTML =
             '<div style="padding:10px 12px;background:#eef5ff;border-left:4px solid #4a6cf7;border-radius:4px;">' +

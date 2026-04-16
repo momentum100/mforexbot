@@ -1,0 +1,146 @@
+<include href="admin/layout.html" />
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+    <h2 style="margin:0;">Постбеки</h2>
+    <div style="font-size:13px;color:#666;">
+        Всего: <strong>{{ @total }}</strong>
+    </div>
+</div>
+
+<!-- Filter bar -->
+<div class="card">
+    <form method="GET" action="/admin/postbacks" class="form-inline">
+        <label style="font-size:12px;font-weight:600;color:#555;">Бот:</label>
+        <select name="bot_id">
+            <option value="">Все боты</option>
+            <repeat group="{{ @bots }}" value="{{ @b }}">
+                <option value="{{ @b.id }}" {{ (string)@current_bot_id === (string)@b.id ? 'selected' : '' }}>
+                    #{{ @b.id }} — {{ @b.name }}
+                </option>
+            </repeat>
+        </select>
+
+        <label style="font-size:12px;font-weight:600;color:#555;margin-left:8px;">Event:</label>
+        <input type="text" name="event_type" value="{{ @current_event_type }}" placeholder="reg, ftd, redep..." style="width:120px;">
+
+        <label style="font-size:12px;font-weight:600;color:#555;margin-left:8px;">Auth:</label>
+        <select name="auth_status">
+            <option value="">Все</option>
+            <option value="ok" {{ @current_auth_status === 'ok' ? 'selected' : '' }}>ok</option>
+            <option value="bad_secret" {{ @current_auth_status === 'bad_secret' ? 'selected' : '' }}>bad_secret</option>
+            <option value="unknown_bot" {{ @current_auth_status === 'unknown_bot' ? 'selected' : '' }}>unknown_bot</option>
+            <option value="missing_params" {{ @current_auth_status === 'missing_params' ? 'selected' : '' }}>missing_params</option>
+        </select>
+
+        <label style="font-size:12px;font-weight:600;color:#555;margin-left:8px;">Telegram ID:</label>
+        <input type="text" name="q" value="{{ @q }}" placeholder="telegram_id" style="width:140px;">
+
+        <button type="submit" class="btn btn-primary btn-sm">Применить</button>
+        <a href="/admin/postbacks" class="btn btn-secondary btn-sm">Сбросить</a>
+    </form>
+</div>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Bot</th>
+                <th>Telegram ID</th>
+                <th>Event</th>
+                <th>Auth Status</th>
+                <th>IP</th>
+                <th>Received At</th>
+                <th>Params</th>
+            </tr>
+        </thead>
+        <tbody>
+            <check if="{{ count(@events) === 0 }}">
+                <tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">Постбеки не найдены.</td></tr>
+            </check>
+            <repeat group="{{ @events }}" value="{{ @e }}">
+                <tr>
+                    <td>{{ @e.id }}</td>
+                    <td>
+                        <check if="{{ @e.bot_id }}">
+                            <true>
+                                <span class="badge badge-info">#{{ @e.bot_id }}</span>
+                                <span style="font-size:12px;color:#666;">{{ @e.bot_name }}</span>
+                            </true>
+                            <false><span style="color:#bbb;">—</span></false>
+                        </check>
+                    </td>
+                    <td>
+                        <check if="{{ @e.telegram_id }}">
+                            <true><code style="font-size:12px;">{{ @e.telegram_id }}</code></true>
+                            <false><span style="color:#bbb;">—</span></false>
+                        </check>
+                    </td>
+                    <td>
+                        <check if="{{ @e.event_type }}">
+                            <true><span class="badge" style="background:#f4f5f7;color:#555;">{{ @e.event_type }}</span></true>
+                            <false><span style="color:#bbb;">—</span></false>
+                        </check>
+                    </td>
+                    <td>
+                        <check if="{{ @e.auth_status === 'ok' }}">
+                            <true><span class="badge" style="background:#d4edda;color:#155724;">ok</span></true>
+                            <false>
+                                <check if="{{ @e.auth_status === 'bad_secret' }}">
+                                    <true><span class="badge" style="background:#f8d7da;color:#721c24;">bad_secret</span></true>
+                                    <false><span class="badge" style="background:#fff3cd;color:#856404;">{{ @e.auth_status }}</span></false>
+                                </check>
+                            </false>
+                        </check>
+                    </td>
+                    <td><code style="font-size:12px;">{{ @e.ip }}</code></td>
+                    <td style="font-size:12px;color:#666;white-space:nowrap;">{{ @e.received_at }}</td>
+                    <td style="max-width:200px;">
+                        <check if="{{ @e.params_json }}">
+                            <true>
+                                <span class="params-short" style="font-size:11px;color:#555;cursor:pointer;"
+                                      onclick="var f=this.nextElementSibling;var s=this;if(f.style.display==='none'){f.style.display='block';s.style.display='none';}">
+                                    {{ strlen(@e.params_json) > 50 ? substr(@e.params_json, 0, 50) . '...' : @e.params_json }}
+                                </span>
+                                <span class="params-full" style="display:none;font-size:11px;color:#555;word-break:break-all;cursor:pointer;"
+                                      onclick="var s=this.previousElementSibling;this.style.display='none';s.style.display='inline';">
+                                    {{ @e.params_json }}
+                                </span>
+                            </true>
+                            <false><span style="color:#bbb;">—</span></false>
+                        </check>
+                    </td>
+                </tr>
+            </repeat>
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<check if="{{ @total_pages > 1 }}">
+    <div class="card" style="display:flex;align-items:center;justify-content:center;gap:12px;">
+        <check if="{{ @page > 1 }}">
+            <true>
+                <a href="/admin/postbacks?{{ http_build_query(array_filter(['bot_id'=>@current_bot_id,'event_type'=>@current_event_type,'auth_status'=>@current_auth_status,'q'=>@q,'page'=>@page-1])) }}"
+                   class="btn btn-sm btn-secondary">← Назад</a>
+            </true>
+            <false>
+                <span class="btn btn-sm btn-secondary" style="opacity:0.4;cursor:not-allowed;">← Назад</span>
+            </false>
+        </check>
+
+        <span style="font-size:13px;color:#555;">Страница <strong>{{ @page }}</strong> из <strong>{{ @total_pages }}</strong></span>
+
+        <check if="{{ @page < @total_pages }}">
+            <true>
+                <a href="/admin/postbacks?{{ http_build_query(array_filter(['bot_id'=>@current_bot_id,'event_type'=>@current_event_type,'auth_status'=>@current_auth_status,'q'=>@q,'page'=>@page+1])) }}"
+                   class="btn btn-sm btn-secondary">Вперёд →</a>
+            </true>
+            <false>
+                <span class="btn btn-sm btn-secondary" style="opacity:0.4;cursor:not-allowed;">Вперёд →</span>
+            </false>
+        </check>
+    </div>
+</check>
+
+<include href="admin/layout_close.html" />

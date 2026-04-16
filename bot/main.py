@@ -18,7 +18,7 @@ from aiogram.enums import ParseMode
 from db import Database
 from i18n import TranslationService
 from notifier import AdminNotifier
-from handlers import start, menu, instruction, language, admin
+from handlers import start, menu, instruction, language, admin, password_gate
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,12 +89,14 @@ async def main() -> None:
         "bot_config": bot_config,
     })
 
-    # Register routers
-    dp.include_router(start.router)
-    dp.include_router(language.router)
-    dp.include_router(menu.router)
-    dp.include_router(instruction.router)
-    dp.include_router(admin.router)
+    # Register routers. Handler modules expose build_router() factories; see
+    # comment in launcher.py (aiogram 3 Routers are stateful, one-per-Dispatcher).
+    dp.include_router(start.build_router())
+    dp.include_router(language.build_router())
+    dp.include_router(password_gate.build_router())
+    dp.include_router(menu.build_router())
+    dp.include_router(instruction.build_router())
+    dp.include_router(admin.build_router())
 
     # Global error handler
     @dp.errors()

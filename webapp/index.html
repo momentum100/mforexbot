@@ -64,6 +64,16 @@
         }
         .generate-btn:hover { opacity: 0.9; }
         .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .generate-btn.closed {
+            background: #2a3744 !important; color: #6b7886 !important;
+            cursor: not-allowed; opacity: 1;
+        }
+        .generate-btn.closed:hover { opacity: 1; }
+        .market-closed-note {
+            text-align: center; font-size: 13px; color: #f5b042;
+            margin-top: 10px; display: none;
+        }
+        .market-closed-note.visible { display: block; }
 
         .signal-result {
             margin-top: 20px; background: #1a2733; border-radius: 12px;
@@ -105,10 +115,60 @@
             vertical-align: middle; margin-right: 8px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        img.emoji {
+            height: 1em;
+            width: 1em;
+            margin: 0 0.05em 0 0.1em;
+            vertical-align: -0.1em;
+        }
+
+        /* Access denied stub */
+        .access-denied-stub {
+            display: none; min-height: 80vh;
+            justify-content: center; align-items: center; flex-direction: column;
+            text-align: center; padding: 20px;
+        }
+        .access-denied-stub.visible { display: flex; }
+        .access-denied-card {
+            background: #1a2733; border-radius: 16px; padding: 32px 24px;
+            max-width: 360px; width: 100%;
+        }
+        .access-denied-card .icon { font-size: 48px; margin-bottom: 16px; }
+        .access-denied-card h2 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+        .access-denied-card p { font-size: 14px; color: #8b9bab; margin-bottom: 16px; line-height: 1.5; }
+        .access-denied-card ul { list-style: none; text-align: left; margin-bottom: 20px; }
+        .access-denied-card ul li { font-size: 14px; color: #c0cdd8; padding: 6px 0; }
+        .access-denied-card ul li::before { content: '\2022'; color: #4a6cf7; font-weight: 700; margin-right: 8px; }
+        .access-denied-btn {
+            display: inline-block; width: 100%; padding: 12px; border: none; border-radius: 8px;
+            font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 8px; text-decoration: none; text-align: center;
+        }
+        .access-denied-btn-support { background: #4a6cf7; color: #fff; }
+        .access-denied-btn-support:hover { opacity: 0.9; }
+        .access-denied-btn-retry { background: #2a3744; color: #c0cdd8; }
+        .access-denied-btn-retry:hover { background: #344454; }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Access denied stub — shown when user hasn't passed bot gates -->
+        <div class="access-denied-stub" id="access-denied-stub">
+            <div class="access-denied-card">
+                <div class="icon">&#9888;&#65039;</div>
+                <h2 id="ad-title">Access restricted</h2>
+                <p id="ad-text">To use the signal service, complete the following steps in the bot menu:</p>
+                <ul>
+                    <li id="ad-step1">Subscribe to the bot channel</li>
+                    <li id="ad-step2">Complete registration or enter access code</li>
+                    <li id="ad-step3">Or contact support</li>
+                </ul>
+                <a class="access-denied-btn access-denied-btn-support" id="ad-btn-support" href="#" target="_blank">&#128172; Support</a>
+                <button class="access-denied-btn access-denied-btn-retry" id="ad-btn-retry" onclick="checkAccess()">&#128260; Check again</button>
+            </div>
+        </div>
+
+        <div id="main-content">
         <div class="header-row">
             <div class="header-text">
                 <h1 id="title">Trading Signals</h1>
@@ -141,6 +201,7 @@
         </div>
 
         <button class="generate-btn" id="generate-btn">⚡ Get Signal</button>
+        <div class="market-closed-note" id="market-closed-note"></div>
 
         <div class="signal-result" id="signal-result">
             <h3 id="signal-title">Signal Generated!</h3>
@@ -159,6 +220,7 @@
         <div class="chart-section" id="chart-section">
             <div class="chart-container" id="tradingview-chart"></div>
         </div>
+        </div> <!-- /main-content -->
     </div>
 
     <script>
@@ -207,6 +269,61 @@
             }).then(function(r) { return r.json(); });
         }
 
+        // ----------------------------------------------------------------
+        // Telegram user ID — used for access check
+        // ----------------------------------------------------------------
+        var tgId = (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id)
+            ? tg.initDataUnsafe.user.id : null;
+
+        // ----------------------------------------------------------------
+        // Access gate — check user status before showing webapp
+        // ----------------------------------------------------------------
+        function applyAccessDeniedTranslations(supportLink) {
+            document.getElementById('ad-title').textContent = t('webapp.access_denied_title', 'Access restricted');
+            document.getElementById('ad-text').textContent = t('webapp.access_denied_text', 'To use the signal service, complete the following steps in the bot menu:');
+            document.getElementById('ad-step1').textContent = t('webapp.access_denied_subscribe', 'Subscribe to the bot channel');
+            document.getElementById('ad-step2').textContent = t('webapp.access_denied_register', 'Complete registration or enter access code');
+            document.getElementById('ad-step3').textContent = t('webapp.access_denied_support', 'Or contact support');
+            document.getElementById('ad-btn-support').textContent = t('webapp.access_denied_btn_support', '\uD83D\uDCAC Support');
+            document.getElementById('ad-btn-retry').textContent = t('webapp.access_denied_btn_retry', '\uD83D\uDD04 Check again');
+            if (supportLink) {
+                document.getElementById('ad-btn-support').href = supportLink;
+                document.getElementById('ad-btn-support').style.display = '';
+            } else {
+                document.getElementById('ad-btn-support').style.display = 'none';
+            }
+            twemojiParse(document.getElementById('access-denied-stub'));
+        }
+
+        var accessSupportLink = null;
+
+        function checkAccess() {
+            if (!tgId) {
+                // No Telegram context (dev mode) — allow access
+                document.getElementById('main-content').style.display = '';
+                document.getElementById('access-denied-stub').classList.remove('visible');
+                return;
+            }
+            apiGet('/check-access?tg_id=' + tgId).then(function(data) {
+                if (data.access) {
+                    document.getElementById('main-content').style.display = '';
+                    document.getElementById('access-denied-stub').classList.remove('visible');
+                } else {
+                    accessSupportLink = data.support_link || null;
+                    document.getElementById('main-content').style.display = 'none';
+                    document.getElementById('access-denied-stub').classList.add('visible');
+                    applyAccessDeniedTranslations(accessSupportLink);
+                }
+            }).catch(function() {
+                // On error, allow access (fail open)
+                document.getElementById('main-content').style.display = '';
+            });
+        }
+
+        // Hide main content initially until access is confirmed
+        document.getElementById('main-content').style.display = 'none';
+        checkAccess();
+
         function t(key, fallback) { return translations[key] || fallback || key; }
 
         function applyTranslations() {
@@ -220,6 +337,13 @@
             document.getElementById('signal-title').textContent = t('webapp.signal_generated', 'Signal Generated!');
             document.getElementById('label-direction').textContent = t('webapp.signal_direction_label', 'SIGNAL DIRECTION');
             document.getElementById('label-confidence').textContent = t('webapp.signal_confidence_label', 'CONFIDENCE LEVEL');
+            twemojiParse(document.body);
+        }
+
+        function twemojiParse(node) {
+            if (window.twemoji && node) {
+                twemoji.parse(node, { folder: 'svg', ext: '.svg' });
+            }
         }
 
         function loadTranslations(lang) {
@@ -227,6 +351,11 @@
             apiGet('/translations?lang=' + lang).then(function(data) {
                 translations = data;
                 applyTranslations();
+                updateMarketStatusUI();
+                // Re-apply stub translations if stub is visible
+                if (document.getElementById('access-denied-stub').classList.contains('visible')) {
+                    applyAccessDeniedTranslations(accessSupportLink);
+                }
             }).catch(function() { /* use fallbacks */ });
         }
 
@@ -260,8 +389,35 @@
                 this.classList.add('active');
                 currentType = this.getAttribute('data-type');
                 loadPairs();
+                updateMarketStatusUI();
             });
         });
+
+        function isForexOpen() {
+            var now = new Date();
+            var dow = now.getUTCDay();
+            var hour = now.getUTCHours();
+            if (dow === 6) return false;
+            if (dow === 0 && hour < 22) return false;
+            if (dow === 5 && hour >= 22) return false;
+            return true;
+        }
+
+        function updateMarketStatusUI() {
+            var note = document.getElementById('market-closed-note');
+            var btn = document.getElementById('generate-btn');
+            var closed = currentType === 'forex' && !isForexOpen();
+            if (closed) {
+                note.textContent = t('webapp.forex_closed_note', 'Forex market is closed — try OTC');
+                note.classList.add('visible');
+                btn.classList.add('closed');
+                btn.disabled = true;
+            } else {
+                note.classList.remove('visible');
+                btn.classList.remove('closed');
+                btn.disabled = false;
+            }
+        }
 
         document.querySelectorAll('.exp-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
@@ -286,13 +442,21 @@
                 placeholder.textContent = t('webapp.currency_pair_placeholder', 'Select a pair...');
                 select.appendChild(placeholder);
 
-                data.forEach(function(pair) {
+                var preferred = currentType === 'forex' ? 'EUR/USD' : 'OTC EUR/USD';
+                var preferredFound = data.some(function(p) { return p.symbol === preferred; });
+                data.forEach(function(pair, idx) {
                     var opt = document.createElement('option');
                     opt.value = pair.symbol;
                     opt.textContent = pair.symbol;
-                    if (pair.symbol === 'EUR/USD') opt.selected = true;
                     select.appendChild(opt);
                 });
+                // Apply selection AFTER all options are in the DOM (Telegram webview reliability).
+                var target = preferredFound ? preferred : (data[0] && data[0].symbol) || '';
+                if (target) {
+                    select.value = target;
+                    // Dispatch change so dependent UI (chart, etc.) updates.
+                    select.dispatchEvent(new Event('change'));
+                }
             }).catch(function() {
                 select.innerHTML = '<option value="">Error loading pairs</option>';
             });
@@ -350,7 +514,14 @@
                 expiration: currentExpiration,
                 type: currentType
             }).then(function(signal) {
-                if (signal.error) { alert(signal.error); return; }
+                if (signal.error) {
+                    if (signal.error === 'forex_market_closed') {
+                        updateMarketStatusUI();
+                        return;
+                    }
+                    alert(signal.error);
+                    return;
+                }
 
                 var dirEl = document.getElementById('signal-direction');
                 if (signal.direction === 'buy') {
@@ -387,11 +558,20 @@
             }).finally(function() {
                 generateBtn.disabled = false;
                 generateBtn.textContent = t('webapp.btn_get_signal', '\u26A1 Get Signal');
+                twemojiParse(generateBtn);
             });
         });
 
         loadTranslations(currentLang);
         loadPairs();
+        updateMarketStatusUI();
+        setInterval(updateMarketStatusUI, 60000);
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous"></script>
+    <script>
+        if (window.twemoji) {
+            twemoji.parse(document.body, { folder: 'svg', ext: '.svg' });
+        }
     </script>
     <script src="https://s3.tradingview.com/tv.js"></script>
 </body>

@@ -4,11 +4,10 @@
 
 **Trigger:** `/start` command
 
-**Auto-language detection:**
-- On first `/start`, bot reads `message.from_user.language_code` from Telegram
-- If it matches a supported language in `languages` table → auto-select it, skip to Screen 1a/2
-- If no match → show language selection screen
-- User can always change language later via "🌐 Change language" button
+**Flow rule:**
+- **New user** (not yet in `users` table) → always show language picker first, regardless of Telegram client language. After they pick a language, proceed to Screen 1a.
+- **Returning user** → skip picker, use stored `lang_code`, proceed to Screen 1a / Screen 2.
+- User can always change language later via "🌐 Change language" button.
 
 **Message text:** "Select language"
 **Layout:** Inline keyboard, 2 columns + 1 centered at bottom
@@ -60,8 +59,13 @@ Registered via BotFather or `set_my_commands` API. Appears when user clicks "Men
 
 ## Screen 1a: Channel Subscription Check
 
-**Trigger:** After language selection, if `bots.linked_channel` is set
-**Check:** `getChatMember(chat_id=linked_channel, user_id=telegram_id)`
+**Trigger:** After language selection (or immediately on `/start` for returning users), if channel is configured.
+
+**Two fields (both used together):**
+- `bots.linked_channel_id` — numeric Telegram chat_id (e.g. `-1002072720405`), used for the `getChatMember` API call. Required for private channels/supergroups without a public username.
+- `bots.linked_channel` — URL or `@username` (e.g. `@Jane_Amore_Trading` or `https://t.me/+invite`), used to build the "Subscribe" button URL. Numeric IDs are not valid as URLs.
+
+**Check:** `getChatMember(chat_id=linked_channel_id or linked_channel, user_id=telegram_id)`
 - Status `member`, `administrator`, `creator` → pass → Screen 2
 - Status `left`, `kicked`, or not found → show gate screen
 
@@ -82,10 +86,149 @@ Registered via BotFather or `set_my_commands` API. Appears when user clicks "Men
 3. Bot re-checks `getChatMember` → pass or show error
 
 **Requirements:**
-- Only checked if `bots.linked_channel` is NOT NULL
+- Only checked if `bots.linked_channel_id` (or `linked_channel` as fallback) is NOT NULL
 - Bot must be **admin** in the linked channel (read member list permission)
 - Uses `getChatMember` API — no need to fetch full user list, checks one user at a time
 - If bot lacks permissions in channel → **block user with error message**, notify admins via `AdminNotifier` to fix permissions. Do NOT silently skip the gate.
+
+---
+
+## Screen 1b: Registration Gate (affiliate)
+
+**Trigger:** After the channel gate passes, if `bots.referral_url_template` is set.
+
+**Check:** A `reg` postback must have been received for this user.
+
+```sql
+SELECT 1 FROM postback_events
+ WHERE bot_id = ? AND telegram_id = ? AND event_type = 'reg'
+ LIMIT 1
+```
+
+**Referral URL substitution:** the template in `bots.referral_url_template` is rendered with:
+- `{user_id}` → Telegram ID (передаётся в партнёрский capture `sub_id1`, откуда возвращается нам в постбеке как `user_id`)
+- `{bot_id}` → our bot id (передаётся в партнёрский capture `site_id`, откуда возвращается нам в постбеке как `bot_id`)
+
+Канонический формат отправки — `sub_id1={user_id}&site_id={bot_id}`; см. [postbacks.md](postbacks.md) для полной таблицы соответствия макросов.
+
+Example template saved in DB:
+```
+https://po-ru4.click/smart/yUKNXc1vSpyXzn?sub_id1={user_id}&site_id={bot_id}
+```
+
+**Gate UI (affiliate only — `access_password` is NULL):**
+```
+⚠️ Для использования бота, пожалуйста, зарегистрируйтесь на партнёрской платформе:
+[ 🔗 Зарегистрироваться ]   ← URL button → rendered referral link
+[ ✅ Я зарегистрировался ]   ← callback `check_registration`
+```
+
+**Gate UI (combined — when BOTH `referral_url_template` AND `access_password` are set):**
+
+Both options are offered in parallel on the same screen — the user picks whichever is easier.
+
+```
+⚠️ Для использования бота зарегистрируйтесь по ссылке партнёра
+   или введите код доступа:
+
+[ 🔗 Зарегистрироваться ]        ← URL button → rendered referral link
+[ ✅ Я зарегистрировался ]        ← callback `check_registration`
+─────────────────────────────
+[ 🔑 Ввести код доступа ]         ← callback `enter_password` → FSM (Screen 1c flow)
+```
+
+The prompt text is `register.combined_required`; the extra button label is `register.btn_enter_password`. Tapping "Ввести код доступа" enters the same FSM state described in Screen 1c (`PasswordGate.waiting_for_password`) and re-uses its cancel/mismatch/success behaviour.
+
+**Gate passes if EITHER a `reg` postback has arrived for this user OR the password was entered correctly** (`users.password_passed = 1`).
+
+**Flow:**
+1. User clicks "Register" → affiliate landing opens with click_id + site_id in URL.
+2. User completes registration on affiliate side.
+3. Affiliate sends postback `bot_id=<bot_id>&user_id=<telegram_id>&event=reg&secret=...` (legacy aliases `site_id` / `click_id` also accepted — см. [postbacks.md](postbacks.md)) → our `/postback` inserts a row into `postback_events`.
+4. User clicks "I registered" → bot re-runs the SELECT above. If row found → main menu. Else alert: "⏳ We haven't received your registration yet."
+5. (Combined gate only) User may instead tap "🔑 Ввести код доступа" at any time → FSM password-entry flow (see Screen 1c). On success → main menu.
+
+**Notes:**
+- If `referral_url_template` is NULL → affiliate gate is skipped.
+- Admin users go through the gate too — simplicity over special-casing.
+- See [postbacks.md](postbacks.md) for the `/postback` endpoint contract.
+- If `bots.access_password` is ALSO set, this screen becomes the **combined gate** above (not a standalone affiliate gate).
+
+### Уведомление о регистрации
+
+При получении постбека `event=reg` (auth_status=ok), PHP автоматически отправляет пользователю сообщение в Telegram с поздравлением и ссылкой на поддержку для получения промо-кода. Текст локализован по `lang_code` пользователя. Ключ перевода: `postback.reg_congrats`. Сообщение содержит плейсхолдер `{support_link}`, подставляемый из `bots.support_link`. Отправка — fire-and-forget: ошибки логируются, но не влияют на ответ постбека.
+
+---
+
+## Screen 1c: Password Gate
+
+**Trigger:** After the channel gate passes, when `bots.access_password` is set (NOT NULL and non-empty). Two shapes:
+
+- **Standalone password gate** — `access_password` is set, `referral_url_template` is NULL. This screen is shown on its own.
+- **Password-half of the combined gate** — both fields are set. The same FSM flow documented below is reached by tapping the "🔑 Ввести код доступа" button on the Screen 1b combined gate.
+
+**Check:** `users.password_passed = 1` for the current user.
+- `1` → bypass gate → Screen 2.
+- `0` → show password gate (standalone) or combined gate (Screen 1b).
+
+**Gate UI (standalone — initial message):**
+```
+🔒 Введите пароль доступа:
+[ ↩️ Отмена ]
+```
+
+The bot enters an FSM state (`PasswordGate.waiting_for_password`) and waits for the next plain text message from the user. In the combined-gate case, the same FSM state is entered when the user taps "🔑 Ввести код доступа".
+
+**Flow:**
+1. Bot shows `password.required` ("Введите код доступа:" / "Enter access code:") with a single inline `↩️ Отмена` / `↩️ Cancel` button (callback `password_cancel`).
+2. User replies with a plain text message.
+3. Bot compares `message.text.strip()` to `bots.access_password` as plaintext (direct string equality).
+   - **Match** → `UPDATE users SET password_passed = 1 WHERE id = ?` → clear FSM state → proceed to Screen 2 (Main Menu). Optionally delete the password message from chat for hygiene.
+   - **Mismatch** → show alert / ephemeral message `password.wrong` ("❌ Неверный код. Попробуйте ещё раз." / "❌ Wrong code. Try again.") → remain in FSM state (user can try again without re-issuing `/start`).
+4. If user taps `↩️ Отмена` → clear FSM state, show `password.cancelled` ("Отменено." / "Cancelled."), no main menu is shown.
+
+**Mismatch response (ephemeral / alert):**
+```
+❌ Неверный код. Попробуйте ещё раз.
+```
+
+**Cancel response:**
+```
+Отменено.
+```
+
+**Notes:**
+- Password is plaintext: stored in `bots.access_password` as-is, compared as-is, and the admin reads/edits it directly in the admin panel.
+- Returning users with `users.password_passed = 1` **bypass the gate entirely** — no re-prompt on subsequent `/start`.
+- Admin users go through the gate too (same rationale as Screen 1b — simplicity over special-casing).
+- Recommended: delete the user's message containing the password after evaluation, so the code does not linger in chat history.
+
+### Gate selection logic
+
+Decision table applied *after* the channel-subscription check (Screen 1a) passes:
+
+| `bots.access_password` | `bots.referral_url_template` | Active gate |
+|------------------------|------------------------------|-------------|
+| NULL / empty           | NULL / empty                 | **No gate** — straight to Screen 2 |
+| NULL / empty           | set                          | **Screen 1b (affiliate-only)** — postback gate |
+| set                    | NULL / empty                 | **Screen 1c (standalone)** — password gate |
+| set                    | set                          | **Combined gate** — Screen 1b layout with both options shown on one screen (register via partner OR enter password) |
+
+Both options are offered in parallel — the user picks whichever is easier. The gate passes if EITHER a `reg` postback arrived OR the password matched.
+
+**Resolution flow (pseudo):**
+```
+if not channel_passed: show 1a
+has_pw   = bool(bots.access_password)
+has_ref  = bool(bots.referral_url_template)
+passed   = users.password_passed or has_reg_postback(user)
+
+if not has_pw and not has_ref:    show 2
+elif passed:                      show 2
+elif has_ref and has_pw:          show 1b (combined layout)
+elif has_ref:                     show 1b (affiliate only)
+else:                             show 1c (standalone password)
+```
 
 ---
 
@@ -284,6 +427,7 @@ Visible OTC pairs (partial list from screenshot):
 - Signal direction and confidence are generated server-side
 - **Styling:** Tailwind CSS + shadcn/ui components (dark theme matching Telegram Mini App aesthetic)
 - **All texts are localized** — fetched from DB by key + user language, never hardcoded
+- **Access gate:** On load, the webapp calls `GET /app/{bot_id}/api/check-access?tg_id=TELEGRAM_ID` to verify `users.status`. If status is `registered` or `deposited`, the signal form is shown. Otherwise, a localized stub page is displayed with instructions to complete bot gates and a link to support. The "Check again" button re-calls the endpoint without reloading. Status lifecycle: `new` (default) -> `registered` (after passing all bot gates or `reg` postback) -> `deposited` (after `ftd` postback). Status only upgrades, never downgrades.
 
 ---
 
@@ -445,10 +589,12 @@ Visible OTC pairs (partial list from screenshot):
 | name | VARCHAR(255) | Bot display name |
 | token | VARCHAR(255) | Telegram Bot API token |
 | webapp_url | VARCHAR(255) NULL | Base URL for Mini Web App |
-| linked_channel | VARCHAR(255) NULL | Channel username or ID for mandatory subscription check |
+| linked_channel | VARCHAR(255) NULL | Channel URL or @username — used to build the "Subscribe" button URL |
+| linked_channel_id | VARCHAR(50) NULL | Numeric Telegram chat_id (e.g. `-1001234567890`) — used for `getChatMember` API calls |
 | support_link | VARCHAR(255) NULL | Support contact t.me/ link (URL button) |
 | referral_url_template | VARCHAR(500) NULL | Referral URL with `{user_id}` placeholder |
 | postback_secret | VARCHAR(255) NULL | Shared secret for postback authentication |
+| access_password | VARCHAR(64) NULL | If set, enables the **password gate**. Plaintext bot-wide shared code, managed via admin panel (read/edit as-is). If `referral_url_template` is also set, the gate becomes a **combined screen** (Screen 1b) offering both options in parallel. See Screen 1c. |
 | created_at | DATETIME | |
 | updated_at | DATETIME | |
 
@@ -466,6 +612,7 @@ Visible OTC pairs (partial list from screenshot):
 | lang_code | VARCHAR(5) | Selected language (default: en) |
 | is_admin | TINYINT(1) | 0 = regular, 1 = bot admin (sees admin menu in bot) |
 | status | ENUM('new','registered','deposited') | User progression: new → registered → deposited |
+| password_passed | TINYINT(1) | `1` once the user has successfully entered `bots.access_password` on this bot (Screen 1c). Defaults to `0`. Ignored when `bots.access_password` is NULL. |
 | created_at | DATETIME | |
 | updated_at | DATETIME | |
 
@@ -534,6 +681,19 @@ Visible OTC pairs (partial list from screenshot):
 ### Key naming convention
 - Dot-separated, scoped by screen/feature
 - Examples: `main_menu.title`, `main_menu.btn_instruction`, `signal.buy`, `webapp.currency_pair_placeholder`
+
+### Translation keys for the password / combined gate (Screen 1b + 1c)
+
+All keys must be seeded for every supported language (EN, RU, ES, AR, PT, TR, HI, UZ, AZ, TG, KO) as base translations (`bot_id = NULL`). Per-bot overrides remain optional. Seeded by `migrations/016_seed_password_translations.sql`.
+
+| Key | Purpose | RU example | EN example |
+|-----|---------|------------|------------|
+| `password.required` | Initial prompt shown when standalone password gate is hit, or when the user has tapped "Enter access code" on the combined gate | `Введите код доступа:` | `Enter access code:` |
+| `password.wrong` | Alert / ephemeral reply on mismatch | `❌ Неверный код. Попробуйте ещё раз.` | `❌ Wrong code. Try again.` |
+| `password.btn_cancel` | Cancel inline-button label | `↩️ Отмена` | `↩️ Cancel` |
+| `password.cancelled` | Confirmation shown after Cancel | `Отменено.` | `Cancelled.` |
+| `register.btn_enter_password` | Extra button on the combined gate that opens the password FSM | `🔑 Ввести код доступа` | `🔑 Enter access code` |
+| `register.combined_required` | Prompt text on the combined gate (affiliate + password on one screen) | `⚠️ Для использования бота зарегистрируйтесь по ссылке партнёра или введите код доступа:` | `⚠️ To use the bot, register via the partner link or enter an access code:` |
 
 ### Multi-tenant note
 - **Every query** filters by `bot_id`

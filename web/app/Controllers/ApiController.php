@@ -253,7 +253,7 @@ class ApiController
             $httpCode   = 400;
             $response   = ['error' => 'Missing required parameters: bot_id (sub_id1/bot_id/site_id), event'];
         } else {
-            $bot = $db->exec('SELECT id, postback_secret FROM bots WHERE id = ?', [$botId]);
+            $bot = $db->exec('SELECT id, postback_secret, token, support_link FROM bots WHERE id = ?', [$botId]);
             if (empty($bot)) {
                 $authStatus = 'unknown_bot';
                 $httpCode   = 404;
@@ -286,8 +286,118 @@ class ApiController
             ]
         );
 
+        // Update user status on successful postback events.
+        if ($authStatus === 'ok' && $telegramId !== null) {
+            if ($event === 'reg') {
+                $db->exec(
+                    "UPDATE users SET status = 'registered', updated_at = NOW()
+                     WHERE bot_id = ? AND telegram_id = ? AND status = 'new'",
+                    [$botId, $telegramId]
+                );
+
+                // Send congratulations notification via Telegram Bot API (fire-and-forget).
+                try {
+                    $botToken = $bot[0]['token'] ?? '';
+                    $supportLink = $bot[0]['support_link'] ?? '';
+                    if ($botToken !== '' && $supportLink !== '') {
+                        $userRow = $db->exec(
+                            'SELECT lang_code FROM users WHERE bot_id = ? AND telegram_id = ?',
+                            [$botId, $telegramId]
+                        );
+                        $langCode = (!empty($userRow)) ? $userRow[0]['lang_code'] : 'en';
+
+                        $msgText = $this->getTranslation($f3, $botId, 'postback.reg_congrats', $langCode);
+                        if ($msgText !== '') {
+                            $msgText = str_replace('{support_link}', $supportLink, $msgText);
+                            $url = 'https://api.telegram.org/bot' . $botToken . '/sendMessage';
+                            $payload = [
+                                'chat_id'    => $telegramId,
+                                'text'       => $msgText,
+                                'parse_mode' => 'HTML',
+                            ];
+                            @file_get_contents($url . '?' . http_build_query($payload));
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    error_log('Postback reg notification failed: ' . $e->getMessage());
+                }
+            } elseif ($event === 'ftd') {
+                $db->exec(
+                    "UPDATE users SET status = 'deposited', updated_at = NOW()
+                     WHERE bot_id = ? AND telegram_id = ? AND status IN ('new','registered')",
+                    [$botId, $telegramId]
+                );
+            }
+        }
+
         http_response_code($httpCode);
         echo json_encode($response);
+    }
+
+    /**
+     * Check whether a Telegram user has webapp access (status is registered or deposited).
+     *
+     * GET /app/{bot_id}/api/check-access?tg_id=TELEGRAM_ID
+     * Returns: { "access": true } or { "access": false, "reason": "not_registered", "support_link": "..." }
+     */
+    public function checkAccess(\Base $f3): void
+    {
+        $botId = (int) $f3->get('PARAMS.bot_id');
+        $tgId  = $f3->get('GET.tg_id');
+
+        if (!$tgId || !is_numeric($tgId)) {
+            echo json_encode(['access' => false, 'reason' => 'missing_tg_id']);
+            return;
+        }
+
+        $telegramId = (int) $tgId;
+        $db = $f3->get('DB');
+
+        $user = $db->exec(
+            'SELECT status FROM users WHERE bot_id = ? AND telegram_id = ?',
+            [$botId, $telegramId]
+        );
+
+        if (!empty($user) && in_array($user[0]['status'], ['registered', 'deposited'], true)) {
+            echo json_encode(['access' => true]);
+            return;
+        }
+
+        // Fetch support_link from bots table for the stub page.
+        $bot = $db->exec('SELECT support_link FROM bots WHERE id = ?', [$botId]);
+        $supportLink = (!empty($bot) && !empty($bot[0]['support_link'])) ? $bot[0]['support_link'] : null;
+
+        echo json_encode([
+            'access'       => false,
+            'reason'       => 'not_registered',
+            'support_link' => $supportLink,
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Fetch a single translation value using two-tier resolution:
+     * 1. Bot override for requested language
+     * 2. Base (bot_id IS NULL) for requested language
+     * 3. Base English fallback
+     *
+     * Returns empty string if no translation found.
+     */
+    private function getTranslation(\Base $f3, int $botId, string $key, string $lang): string
+    {
+        $db = $f3->get('DB');
+        $rows = $db->exec(
+            "SELECT value FROM translations
+             WHERE `key` = ? AND lang_code = ? AND bot_id = ?
+             UNION ALL
+             SELECT value FROM translations
+             WHERE `key` = ? AND lang_code = ? AND bot_id IS NULL
+             UNION ALL
+             SELECT value FROM translations
+             WHERE `key` = ? AND lang_code = 'en' AND bot_id IS NULL
+             LIMIT 1",
+            [$key, $lang, $botId, $key, $lang, $key]
+        );
+        return (!empty($rows)) ? (string) $rows[0]['value'] : '';
     }
 
     /**

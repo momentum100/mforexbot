@@ -22,6 +22,12 @@ Multi-tenant Telegram bot platform for forex trading signal analysis. Supports m
 - Each bot instance runs as a separate process
 - Web App and Admin Panel resolve `bot_id` from URL or session context
 
+## Global settings (exception to multi-tenant rule)
+- `settings` table (migration 017) is **truly global** — no `bot_id` column.
+- Key-value store for platform-wide config that doesn't sensibly scale per bot.
+- Current keys: `postback_base_url` (used to render the full postback URL for each bot's partner cabinet in `/admin/bots` edit form).
+- Edited in `/admin/settings`. Add new keys via plain `INSERT`; no schema change needed.
+
 ## Architecture Guidelines
 - **S** — Single Responsibility: each module/class does one thing
 - **O** — Open/Closed: extend via new classes, not modifying existing
@@ -53,3 +59,7 @@ Multi-tenant Telegram bot platform for forex trading signal analysis. Supports m
 1. Document first — define flows, menus, schemas in docs
 2. Test — write tests for expected behavior
 3. Code — implement against docs and tests
+
+## Agent Delegation Rule
+- All code writing, code fixes, documentation edits, and migration creation MUST be delegated to a subagent with `model: "opus"` explicitly set.
+- Read-only exploration (grep, review, status reports) may run in the main loop or default agents.
