@@ -1,7 +1,8 @@
 import os, mysql.connector
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv("c:/Projects/m-bot-forex/.env")
+load_dotenv(str(Path(__file__).resolve().parent.parent / ".env"))
 c = mysql.connector.connect(
     host=os.getenv("DB_HOST"), port=int(os.getenv("DB_PORT")),
     user=os.getenv("DB_USER"), password=os.getenv("DB_PASS"),
