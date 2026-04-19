@@ -105,6 +105,34 @@
             </div>
 
             <!--
+                Access gate toggles (migration 022). Each flag only takes effect when
+                the paired field (linked_channel_id / referral_url_template / access_password)
+                is also filled in — see the hint below the checkboxes.
+            -->
+            <div style="grid-column:1 / -1;border:1px solid #e3e6ee;border-radius:6px;padding:12px 14px;background:#fafbfe;">
+                <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Гейты доступа</div>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:6px;">
+                    <input type="checkbox" name="channel_gate_enabled" id="bot-channel-gate-enabled" value="1">
+                    Гейт канала (Screen 1a) — требует подписку на привязанный канал
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:6px;">
+                    <input type="checkbox" name="reg_gate_enabled" id="bot-reg-gate-enabled" value="1">
+                    Гейт регистрации (Screen 1b) — требует партнёрский <code>reg</code> постбек
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:6px;">
+                    <input type="checkbox" name="password_gate_enabled" id="bot-password-gate-enabled" value="1">
+                    Парольный гейт (Screen 1c) — требует ввод кода доступа
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" name="deposit_gate_enabled" id="bot-deposit-gate-enabled" value="1">
+                    Депозитный гейт (Screen 1d) — требует партнёрский <code>ftd</code> постбек
+                </label>
+                <div style="font-size:11px;color:#888;margin-top:8px;line-height:1.4;">
+                    Тумблер включает гейт только если соответствующее поле заполнено (канал / ссылка / пароль). Флаг без заполненного поля = no-op.
+                </div>
+            </div>
+
+            <!--
                 Postback URL hint (re-rendered client-side by editBot()).
                 Server-side it's always empty on first render because the form starts
                 in "create" mode. Depends on the global setting `postback_base_url`
@@ -237,6 +265,10 @@
         document.getElementById('bot-referral-url').value = bot.referral_url_template || '';
         document.getElementById('bot-postback-secret').value = bot.postback_secret || '';
         document.getElementById('bot-access-password').value = bot.access_password || '';
+        document.getElementById('bot-channel-gate-enabled').checked  = !!Number(bot.channel_gate_enabled);
+        document.getElementById('bot-reg-gate-enabled').checked      = !!Number(bot.reg_gate_enabled);
+        document.getElementById('bot-password-gate-enabled').checked = !!Number(bot.password_gate_enabled);
+        document.getElementById('bot-deposit-gate-enabled').checked  = !!Number(bot.deposit_gate_enabled);
         document.getElementById('bot-is-active').checked = !!Number(bot.is_active);
 
         renderPostbackHint(bot);
@@ -256,6 +288,10 @@
         document.getElementById('bot-referral-url').value = '';
         document.getElementById('bot-postback-secret').value = '';
         document.getElementById('bot-access-password').value = '';
+        document.getElementById('bot-channel-gate-enabled').checked  = false;
+        document.getElementById('bot-reg-gate-enabled').checked      = false;
+        document.getElementById('bot-password-gate-enabled').checked = false;
+        document.getElementById('bot-deposit-gate-enabled').checked  = false;
         document.getElementById('bot-is-active').checked = true;
         renderPostbackHint(null);
     }

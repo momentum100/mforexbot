@@ -104,6 +104,11 @@ def build_router() -> Router:
         if not await _pass_registration_gate(callback, db, i18n, bot_config, telegram_id, lang):
             return
 
+        # Deposit gate (Screen 1d)
+        from handlers.deposit_gate import _pass_deposit_gate
+        if not await _pass_deposit_gate(callback, db, i18n, bot_config, telegram_id, lang):
+            return
+
         # Show main menu (with banner image)
         await _show_main_menu(callback, db, i18n, bot_config, user)
 

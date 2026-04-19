@@ -18,7 +18,7 @@ from aiogram.enums import ParseMode
 from db import Database
 from i18n import TranslationService
 from notifier import AdminNotifier
-from handlers import start, menu, instruction, language, admin, password_gate
+from handlers import start, menu, instruction, language, admin, password_gate, deposit_gate
 
 logging.basicConfig(
     level=logging.INFO,
@@ -94,6 +94,7 @@ async def main() -> None:
     dp.include_router(start.build_router())
     dp.include_router(language.build_router())
     dp.include_router(password_gate.build_router())
+    dp.include_router(deposit_gate.build_router())
     dp.include_router(menu.build_router())
     dp.include_router(instruction.build_router())
     dp.include_router(admin.build_router())

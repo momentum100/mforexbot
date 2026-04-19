@@ -57,12 +57,16 @@ async def check_channel_subscription(
         True  — user is a member / admin / creator.
         False — user is not a member, OR the probe failed (bot lacks admin
                 rights in the channel). The caller should show the gate.
-        None  — no linked_channel configured on this bot → no gate.
+        None  — no linked_channel configured OR gate disabled via
+                channel_gate_enabled → no gate.
 
     The notifier is used to raise a warning to admins when we can't probe
     the channel (the docs say "Block user per docs" in that case, hence we
     return False).
     """
+    if not bot_config.get("channel_gate_enabled"):
+        return None
+
     chat_id = bot_config.get("linked_channel_id") or bot_config.get("linked_channel")
     if not chat_id:
         return None

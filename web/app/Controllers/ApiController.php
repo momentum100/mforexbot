@@ -478,10 +478,21 @@ class ApiController
     }
 
     /**
-     * Check whether a Telegram user has webapp access (status is registered or deposited).
+     * Check whether a Telegram user has webapp access.
+     *
+     * Gate priority (migration 022 adds reg_gate_enabled / deposit_gate_enabled):
+     *   - deposit_gate_enabled = 1 → access requires users.status = 'deposited'
+     *     (denied reason: 'not_deposited')
+     *   - else reg_gate_enabled = 1 → access requires users.status IN
+     *     ('registered','deposited')  (denied reason: 'not_registered')
+     *   - else no gate → access always granted.
+     *
+     * The deposit gate dominates the registration gate when both are enabled,
+     * because 'deposited' is a strict superset of 'registered' in the funnel.
      *
      * GET /app/{bot_id}/api/check-access?tg_id=TELEGRAM_ID
-     * Returns: { "access": true } or { "access": false, "reason": "not_registered", "support_link": "..." }
+     * Returns: { "access": true }
+     *   or    { "access": false, "reason": "not_registered"|"not_deposited"|"missing_tg_id", "support_link": "..." }
      */
     public function checkAccess(\Base $f3): void
     {
@@ -496,19 +507,47 @@ class ApiController
         $telegramId = (int) $tgId;
         $db = $f3->get('DB');
 
-        $user = $db->exec(
-            'SELECT status FROM users WHERE bot_id = ? AND telegram_id = ?',
-            [$botId, $telegramId]
+        // Fetch gate flags + support_link in one trip.
+        $botRows = $db->exec(
+            'SELECT support_link, reg_gate_enabled, deposit_gate_enabled FROM bots WHERE id = ?',
+            [$botId]
         );
+        $bot = !empty($botRows) ? $botRows[0] : null;
+        $supportLink = (!empty($bot) && !empty($bot['support_link'])) ? $bot['support_link'] : null;
 
-        if (!empty($user) && in_array($user[0]['status'], [UserStatus::REGISTERED, UserStatus::DEPOSITED], true)) {
+        $regGate     = !empty($bot) && (int) $bot['reg_gate_enabled'] === 1;
+        $depositGate = !empty($bot) && (int) $bot['deposit_gate_enabled'] === 1;
+
+        // No gates active → unconditional access.
+        if (!$regGate && !$depositGate) {
             echo json_encode(['access' => true]);
             return;
         }
 
-        // Fetch support_link from bots table for the stub page.
-        $bot = $db->exec('SELECT support_link FROM bots WHERE id = ?', [$botId]);
-        $supportLink = (!empty($bot) && !empty($bot[0]['support_link'])) ? $bot[0]['support_link'] : null;
+        $userRows = $db->exec(
+            'SELECT status FROM users WHERE bot_id = ? AND telegram_id = ?',
+            [$botId, $telegramId]
+        );
+        $status = !empty($userRows) ? $userRows[0]['status'] : null;
+
+        if ($depositGate) {
+            if ($status === UserStatus::DEPOSITED) {
+                echo json_encode(['access' => true]);
+                return;
+            }
+            echo json_encode([
+                'access'       => false,
+                'reason'       => 'not_deposited',
+                'support_link' => $supportLink,
+            ], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        // reg gate only.
+        if (in_array($status, [UserStatus::REGISTERED, UserStatus::DEPOSITED], true)) {
+            echo json_encode(['access' => true]);
+            return;
+        }
 
         echo json_encode([
             'access'       => false,

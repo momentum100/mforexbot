@@ -59,7 +59,7 @@ Registered via BotFather or `set_my_commands` API. Appears when user clicks "Men
 
 ## Screen 1a: Channel Subscription Check
 
-**Trigger:** After language selection (or immediately on `/start` for returning users), if channel is configured.
+**Trigger:** After language selection (or immediately on `/start` for returning users), if `bots.channel_gate_enabled = 1` AND `bots.linked_channel_id` (or `linked_channel`) is set. The toggle replaces the earlier "activated by presence of `linked_channel_id`" rule — presence of the config alone is no longer enough.
 
 **Two fields (both used together):**
 - `bots.linked_channel_id` — numeric Telegram chat_id (e.g. `-1002072720405`), used for the `getChatMember` API call. Required for private channels/supergroups without a public username.
@@ -86,7 +86,7 @@ Registered via BotFather or `set_my_commands` API. Appears when user clicks "Men
 3. Bot re-checks `getChatMember` → pass or show error
 
 **Requirements:**
-- Only checked if `bots.linked_channel_id` (or `linked_channel` as fallback) is NOT NULL
+- Only checked if `bots.channel_gate_enabled = 1` AND `bots.linked_channel_id` (or `linked_channel` as fallback) is NOT NULL. Toggling `channel_gate_enabled` to 1 without filling the channel id is a no-op — the gate stays skipped.
 - Bot must be **admin** in the linked channel (read member list permission)
 - Uses `getChatMember` API — no need to fetch full user list, checks one user at a time
 - If bot lacks permissions in channel → **block user with error message**, notify admins via `AdminNotifier` to fix permissions. Do NOT silently skip the gate.
@@ -95,7 +95,7 @@ Registered via BotFather or `set_my_commands` API. Appears when user clicks "Men
 
 ## Screen 1b: Registration Gate (affiliate)
 
-**Trigger:** After the channel gate passes, if `bots.referral_url_template` is set.
+**Trigger:** After the channel gate passes, if `bots.reg_gate_enabled = 1` AND `bots.referral_url_template` is set. The toggle replaces the earlier "activated if `referral_url_template` is set" rule — presence of the template alone is no longer enough.
 
 **Check:** A `reg` postback must have been received for this user.
 
@@ -149,10 +149,10 @@ The prompt text is `register.combined_required`; the extra button label is `regi
 5. (Combined gate only) User may instead tap "🔑 Ввести код доступа" at any time → FSM password-entry flow (see Screen 1c). On success → main menu.
 
 **Notes:**
-- If `referral_url_template` is NULL → affiliate gate is skipped.
+- If `bots.reg_gate_enabled = 0` OR `referral_url_template` is NULL → affiliate gate is skipped. Both toggle AND config must be present.
 - Admin users go through the gate too — simplicity over special-casing.
 - See [postbacks.md](postbacks.md) for the `/postback` endpoint contract.
-- If `bots.access_password` is ALSO set, this screen becomes the **combined gate** above (not a standalone affiliate gate).
+- If `bots.password_gate_enabled = 1` AND `bots.access_password` is ALSO set, this screen becomes the **combined gate** above (not a standalone affiliate gate).
 
 ### Уведомление о регистрации
 
@@ -162,10 +162,10 @@ The prompt text is `register.combined_required`; the extra button label is `regi
 
 ## Screen 1c: Password Gate
 
-**Trigger:** After the channel gate passes, when `bots.access_password` is set (NOT NULL and non-empty). Two shapes:
+**Trigger:** After the channel gate passes, when `bots.password_gate_enabled = 1` AND `bots.access_password` is set (NOT NULL and non-empty). The toggle replaces the earlier "activated by presence of `access_password`" rule — presence of the password alone is no longer enough. Two shapes:
 
-- **Standalone password gate** — `access_password` is set, `referral_url_template` is NULL. This screen is shown on its own.
-- **Password-half of the combined gate** — both fields are set. The same FSM flow documented below is reached by tapping the "🔑 Ввести код доступа" button on the Screen 1b combined gate.
+- **Standalone password gate** — `password_gate_enabled = 1`, `access_password` set, and either `reg_gate_enabled = 0` or `referral_url_template` NULL. This screen is shown on its own.
+- **Password-half of the combined gate** — both gates are enabled and both config fields are set. The same FSM flow documented below is reached by tapping the "🔑 Ввести код доступа" button on the Screen 1b combined gate.
 
 **Check:** `users.password_passed = 1` for the current user.
 - `1` → bypass gate → Screen 2.
@@ -205,30 +205,80 @@ The bot enters an FSM state (`PasswordGate.waiting_for_password`) and waits for 
 
 ### Gate selection logic
 
-Decision table applied *after* the channel-subscription check (Screen 1a) passes:
+Decision table applied *after* the channel-subscription check (Screen 1a) passes. A gate is "active" only when **both** its toggle is `1` **and** its companion config field is non-empty — a toggle alone (or config alone) never activates the gate.
 
-| `bots.access_password` | `bots.referral_url_template` | Active gate |
-|------------------------|------------------------------|-------------|
-| NULL / empty           | NULL / empty                 | **No gate** — straight to Screen 2 |
-| NULL / empty           | set                          | **Screen 1b (affiliate-only)** — postback gate |
-| set                    | NULL / empty                 | **Screen 1c (standalone)** — password gate |
-| set                    | set                          | **Combined gate** — Screen 1b layout with both options shown on one screen (register via partner OR enter password) |
+Let `pw_on = bots.password_gate_enabled = 1 AND bots.access_password is set` and `reg_on = bots.reg_gate_enabled = 1 AND bots.referral_url_template is set`:
 
-Both options are offered in parallel — the user picks whichever is easier. The gate passes if EITHER a `reg` postback arrived OR the password matched.
+| `pw_on` | `reg_on` | Active gate |
+|---------|----------|-------------|
+| false   | false    | **No reg/password gate** — proceed to Screen 1d check |
+| false   | true     | **Screen 1b (affiliate-only)** — postback gate |
+| true    | false    | **Screen 1c (standalone)** — password gate |
+| true    | true     | **Combined gate** — Screen 1b layout with both options shown on one screen (register via partner OR enter password) |
+
+Both options on the combined gate are offered in parallel — the user picks whichever is easier. The gate passes if EITHER a `reg` postback arrived OR the password matched.
 
 **Resolution flow (pseudo):**
 ```
 if not channel_passed: show 1a
-has_pw   = bool(bots.access_password)
-has_ref  = bool(bots.referral_url_template)
-passed   = users.password_passed or has_reg_postback(user)
+pw_on  = bots.password_gate_enabled and bool(bots.access_password)
+reg_on = bots.reg_gate_enabled      and bool(bots.referral_url_template)
+dep_on = bots.deposit_gate_enabled
+reg_pw_passed = users.password_passed or has_reg_postback(user)
 
-if not has_pw and not has_ref:    show 2
-elif passed:                      show 2
-elif has_ref and has_pw:          show 1b (combined layout)
-elif has_ref:                     show 1b (affiliate only)
-else:                             show 1c (standalone password)
+# Screen 1b / 1c
+if   pw_on and reg_on and not reg_pw_passed: show 1b (combined layout)
+elif reg_on            and not reg_pw_passed: show 1b (affiliate only)
+elif pw_on             and not reg_pw_passed: show 1c (standalone password)
+
+# Screen 1d (deposit gate) — runs AFTER reg/password gate passes
+if dep_on and not has_ftd_postback(user): show 1d
+else: show 2
 ```
+
+Note: `channel_gate_enabled` gates Screen 1a similarly — `bots.channel_gate_enabled = 1 AND linked_channel_id is set` is required to engage Screen 1a.
+
+---
+
+## Screen 1d: Deposit Gate
+
+**Trigger:** After Screen 1b/1c passes (or is skipped), if `bots.deposit_gate_enabled = 1`. Same three entry points as the registration gate: `/start`, the post-channel-subscribe callback, and the post-language-pick callback. Sequential — the user must pass Screen 1d before the main menu is shown.
+
+**Check:** A `ftd` postback must have been received and authenticated for this user.
+
+```sql
+SELECT 1 FROM postback_events
+ WHERE bot_id = ? AND telegram_id = ? AND event_type = 'ftd' AND auth_status = 'ok'
+ LIMIT 1
+```
+
+Gate passes if a row is found.
+
+**Deposit URL:** rendered from `bots.referral_url_template` using the same `{user_id}` / `{bot_id}` substitution as the registration link (see Screen 1b). **No separate deposit-URL column** — we intentionally reuse `referral_url_template` to avoid schema bloat. Partner cabinets typically do NOT require the user to go through the referral link again in order to deposit — the user can deposit straight from an already-open partner account — but reusing our referral link is the simplest path when the user has no session, and the user is free to close the tab if they already have the cabinet open in another window.
+
+**Gate UI:**
+```
+💰 Для доступа к сигналам сделайте депозит:
+[ 💳 Сделать депозит   ]   ← URL button → rendered referral link
+[ ✅ Я сделал депозит   ]   ← callback `check_deposit`
+[ 🔗 Поддержка         ]   ← URL button → bots.support_link
+```
+
+**Flow:**
+1. User clicks "💳 Сделать депозит" → partner cabinet opens. User completes the deposit (in the same account or a newly-registered one).
+2. Partner sends postback `event=ftd` → `/postback` inserts a row into `postback_events`; PHP also flips `users.status` → `deposited` via `ApiController::applyStatusTransition`.
+3. User clicks "✅ Я сделал депозит" → bot re-runs the SELECT above. Row found → Screen 2 (Main Menu). Else ephemeral alert `deposit.not_yet` ("⏳ We haven't seen your deposit yet.").
+4. "🔗 Поддержка" opens `bots.support_link` in Telegram.
+
+**Notes:**
+- **No DM is sent on `event=ftd`** (explicit product decision — unlike `event=reg`, which triggers `postback.reg_congrats`). The user sees the success flow in-bot when they re-tap "Я сделал депозит".
+- If `bots.deposit_gate_enabled = 0` → gate is skipped entirely; user proceeds to Screen 2 after the reg/password gate passes.
+- If `bots.deposit_gate_enabled = 1` but `referral_url_template` is NULL, the "💳 Сделать депозит" button is impossible to render — the admin must fill `referral_url_template` for the toggle to be meaningful. This is the same "toggle + config must both be present" rule as the other gates.
+- The "🔗 Поддержка" button is omitted entirely when `bots.support_link` is NULL.
+- Admin users go through the gate too — same rationale as Screens 1b/1c.
+- `users.status = 'deposited'` and a passing `ftd`-postback gate check are equivalent: both conditions are set by the same postback.
+
+**Translation keys used:** `deposit.required`, `deposit.btn_deposit`, `deposit.btn_check`, `deposit.btn_support`, `deposit.not_yet`. Seeded by `migrations/023_seed_deposit_translations.sql` (to be created in the next phase).
 
 ---
 
@@ -596,6 +646,10 @@ Visible OTC pairs (partial list from screenshot):
 | referral_url_template | VARCHAR(500) NULL | Referral URL with `{user_id}` placeholder |
 | postback_secret | VARCHAR(255) NULL | Shared secret for postback authentication |
 | access_password | VARCHAR(64) NULL | If set, enables the **password gate**. Plaintext bot-wide shared code, managed via admin panel (read/edit as-is). If `referral_url_template` is also set, the gate becomes a **combined screen** (Screen 1b) offering both options in parallel. See Screen 1c. |
+| channel_gate_enabled | TINYINT(1) NOT NULL DEFAULT 0 | Per-bot toggle for Screen 1a (channel subscription check). Gate engages only if this is `1` **and** `linked_channel_id` is set. Backfilled to `1` on migration 022 when `linked_channel_id` was already set. |
+| reg_gate_enabled | TINYINT(1) NOT NULL DEFAULT 0 | Per-bot toggle for Screen 1b (registration gate). Gate engages only if this is `1` **and** `referral_url_template` is set. Backfilled to `1` on migration 022 when `referral_url_template` was already set. |
+| password_gate_enabled | TINYINT(1) NOT NULL DEFAULT 0 | Per-bot toggle for Screen 1c (password gate, or password-half of the combined Screen 1b). Gate engages only if this is `1` **and** `access_password` is set. Backfilled to `1` on migration 022 when `access_password` was already set. |
+| deposit_gate_enabled | TINYINT(1) NOT NULL DEFAULT 0 | Per-bot toggle for Screen 1d (deposit gate). Gate engages only if this is `1` **and** `referral_url_template` is set (same template reused for the deposit URL). Always backfilled to `0` — admin must explicitly opt in. |
 | created_at | DATETIME | |
 | updated_at | DATETIME | |
 
@@ -696,6 +750,18 @@ All keys must be seeded for every supported language (EN, RU, ES, AR, PT, TR, HI
 | `register.btn_enter_password` | Extra button on the combined gate that opens the password FSM | `🔑 Ввести код доступа` | `🔑 Enter access code` |
 | `register.combined_required` | Prompt text on the combined gate (affiliate + password on one screen) | `⚠️ Для использования бота зарегистрируйтесь по ссылке партнёра или введите код доступа:` | `⚠️ To use the bot, register via the partner link or enter an access code:` |
 
+### Translation keys for the deposit gate (Screen 1d)
+
+All keys must be seeded for every supported language (EN, RU, ES, AR, PT, TR, HI, UZ, AZ, TG, KO) as base translations (`bot_id = NULL`). Per-bot overrides remain optional. Seeded by `migrations/023_seed_deposit_translations.sql`.
+
+| Key | Purpose | RU example | EN example |
+|-----|---------|------------|------------|
+| `deposit.required` | Prompt shown on Screen 1d when the user has not yet deposited | `💰 Для доступа к сигналам сделайте депозит:` | `💰 To access signals, please make a deposit:` |
+| `deposit.btn_deposit` | "Make deposit" URL button label | `💳 Сделать депозит` | `💳 Make deposit` |
+| `deposit.btn_check` | "I made deposit" callback button label | `✅ Я сделал депозит` | `✅ I made a deposit` |
+| `deposit.btn_support` | Support URL button label on the deposit gate | `🔗 Поддержка` | `🔗 Support` |
+| `deposit.not_yet` | Alert / ephemeral reply when the `ftd` postback has not arrived yet | `⏳ Мы ещё не видели ваш депозит.` | `⏳ We haven't seen your deposit yet.` |
+
 ### DB Table: `settings` (global key-value)
 
 Truly global settings — **no `bot_id` column**. Shared across all bots.
@@ -735,6 +801,7 @@ new  ──►  registered  ──►  deposited
 - PHP postback endpoint updates `users.status` on `reg` and `ftd` events.
 - Bot Python code updates `users.status = 'registered'` when user passes all gates.
 - Statistics (Screen 5a) and webapp access gate both rely on this field.
+- `status = 'deposited'` is also the pass-criterion for Screen 1d (Deposit Gate) — the same `ftd` postback that upgrades the status is what opens the gate, so the two are guaranteed to move together.
 
 ---
 
@@ -770,6 +837,12 @@ Bot edit form (`/admin/bots`) includes the following fields relevant to today's 
 | Admin group ID | `admin_group_id` | ID группы — админы | Telegram chat ID; bot sends event notifications here |
 | Access password | `access_password` | Пароль доступа | Plaintext; enables password gate (Screen 1c) |
 | Postback secret | `postback_secret` | Postback Secret | Shared secret for postback auth |
+| Channel gate enabled | `channel_gate_enabled` | Включить гейт канала | Checkbox (TINYINT(1)). Engages Screen 1a. |
+| Registration gate enabled | `reg_gate_enabled` | Включить гейт регистрации | Checkbox (TINYINT(1)). Engages Screen 1b. |
+| Password gate enabled | `password_gate_enabled` | Включить парольный гейт | Checkbox (TINYINT(1)). Engages Screen 1c (or combined gate on Screen 1b when `reg_gate_enabled` is also on). |
+| Deposit gate enabled | `deposit_gate_enabled` | Включить депозитный гейт | Checkbox (TINYINT(1)). Engages Screen 1d. |
+
+**Toggle + config rule:** A gate toggle is only half of the equation. The corresponding config field (`linked_channel_id` for channel, `referral_url_template` for registration and deposit, `access_password` for password) must **also** be non-empty — otherwise the gate stays skipped even if the toggle is on. Toggling a checkbox to 1 without filling the matching config is effectively a no-op. Backfill on migration 022 turns each toggle on where the companion config is already populated, except `deposit_gate_enabled` which defaults to 0 (admin must explicitly opt in).
 
 **Postback URL hint** — shown below the `postback_secret` field. Three states:
 

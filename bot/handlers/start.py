@@ -129,9 +129,13 @@ async def _pass_registration_gate(
 
     Resolution (matches docs/bot-flow.md → "Gate selection logic"):
 
-      has_password = bool(bot_config.access_password)
-      has_affiliate = bool(bot_config.referral_url_template)
+      has_password  = bool(bot_config.access_password)         AND bool(bot_config.password_gate_enabled)
+      has_affiliate = bool(bot_config.referral_url_template)   AND bool(bot_config.reg_gate_enabled)
       passed = users.password_passed OR has_reg_postback(user)
+
+      Each "has X" requires BOTH the companion config field (non-empty)
+      AND its enablement toggle on the `bots` row. Toggling on without
+      filling the config is a silent no-op — nothing to render a gate for.
 
       - neither set       → no gate, pass
       - already passed    → pass
@@ -140,9 +144,9 @@ async def _pass_registration_gate(
       - password only     → Screen 1c (standalone password gate)
     """
     access_password = (bot_config.get("access_password") or "").strip()
-    has_password = bool(access_password)
+    has_password = bool(access_password) and bool(bot_config.get("password_gate_enabled"))
     ref_url = _build_referral_url(bot_config, telegram_id)
-    has_affiliate = bool(ref_url)
+    has_affiliate = bool(ref_url) and bool(bot_config.get("reg_gate_enabled"))
 
     # No gate configured at all.
     if not has_password and not has_affiliate:
@@ -244,6 +248,11 @@ def build_router() -> Router:
         if not await _pass_registration_gate(message, db, i18n, bot_config, tg_user.id, lang):
             return
 
+        # Deposit gate (Screen 1d)
+        from handlers.deposit_gate import _pass_deposit_gate
+        if not await _pass_deposit_gate(message, db, i18n, bot_config, tg_user.id, lang):
+            return
+
         # Show main menu
         await _show_main_menu(message, db, i18n, bot_config, user)
 
@@ -266,6 +275,9 @@ def build_router() -> Router:
             await callback.answer()
             if not await _pass_registration_gate(callback, db, i18n, bot_config, callback.from_user.id, lang):
                 return
+            from handlers.deposit_gate import _pass_deposit_gate
+            if not await _pass_deposit_gate(callback, db, i18n, bot_config, callback.from_user.id, lang):
+                return
             await _show_main_menu(callback, db, i18n, bot_config, user)
         else:
             await callback.answer(i18n.t("channel.not_subscribed", lang), show_alert=True)
@@ -282,6 +294,9 @@ def build_router() -> Router:
 
         if db.has_postback_event(callback.from_user.id, PostbackEvent.REG):
             await callback.answer()
+            from handlers.deposit_gate import _pass_deposit_gate
+            if not await _pass_deposit_gate(callback, db, i18n, bot_config, callback.from_user.id, lang):
+                return
             await _show_main_menu(callback, db, i18n, bot_config, user)
         else:
             await callback.answer(i18n.t("register.not_yet", lang), show_alert=True)

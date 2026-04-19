@@ -74,6 +74,13 @@ class BotsController extends AdminBaseController
         // Plaintext bot-wide access password (migration 015). Empty → NULL (gate disabled).
         // Per product decision: no hashing, admin reads/edits as-is.
         $accessPassword = trim($f3->get('POST.access_password') ?? '') ?: null;
+        // Access-gate toggles (migration 022). Each flag only takes effect when
+        // the paired field is filled in (channel id / referral url / password);
+        // enabling a flag without the paired field is a silent no-op at runtime.
+        $channelGateEnabled  = $f3->get('POST.channel_gate_enabled')  ? 1 : 0;
+        $regGateEnabled      = $f3->get('POST.reg_gate_enabled')      ? 1 : 0;
+        $passwordGateEnabled = $f3->get('POST.password_gate_enabled') ? 1 : 0;
+        $depositGateEnabled  = $f3->get('POST.deposit_gate_enabled')  ? 1 : 0;
         // Checkbox: present in POST when checked, absent when not.
         $isActive = $f3->get('POST.is_active') ? 1 : 0;
 
@@ -86,18 +93,26 @@ class BotsController extends AdminBaseController
             // Update existing bot
             $db->exec(
                 'UPDATE bots SET name = ?, token = ?, webapp_url = ?, linked_channel = ?, linked_channel_id = ?,
-                 admin_group_id = ?, support_link = ?, referral_url_template = ?, postback_secret = ?, access_password = ?, is_active = ?,
+                 admin_group_id = ?, support_link = ?, referral_url_template = ?, postback_secret = ?, access_password = ?,
+                 channel_gate_enabled = ?, reg_gate_enabled = ?, password_gate_enabled = ?, deposit_gate_enabled = ?,
+                 is_active = ?,
                  updated_at = NOW()
                  WHERE id = ?',
-                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive, $id]
+                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword,
+                 $channelGateEnabled, $regGateEnabled, $passwordGateEnabled, $depositGateEnabled,
+                 $isActive, $id]
             );
             $botId = $id;
         } else {
             // Create new bot
             $db->exec(
-                'INSERT INTO bots (name, token, webapp_url, linked_channel, linked_channel_id, admin_group_id, support_link, referral_url_template, postback_secret, access_password, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword, $isActive]
+                'INSERT INTO bots (name, token, webapp_url, linked_channel, linked_channel_id, admin_group_id, support_link, referral_url_template, postback_secret, access_password,
+                 channel_gate_enabled, reg_gate_enabled, password_gate_enabled, deposit_gate_enabled,
+                 is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword,
+                 $channelGateEnabled, $regGateEnabled, $passwordGateEnabled, $depositGateEnabled,
+                 $isActive]
             );
             $botId = (int) $db->exec('SELECT LAST_INSERT_ID() AS id')[0]['id'];
         }

@@ -148,6 +148,11 @@ def build_router() -> Router:
                 message, db, i18n, bot_config, message.from_user.id, lang
             ):
                 return
+            from handlers.deposit_gate import _pass_deposit_gate
+            if not await _pass_deposit_gate(
+                message, db, i18n, bot_config, message.from_user.id, lang
+            ):
+                return
             user = db.get_user(message.from_user.id)
             await _show_main_menu(message, db, i18n, bot_config, user)
             return
@@ -166,6 +171,11 @@ def build_router() -> Router:
             # Re-run the gate (now passing) and show main menu.
             from handlers.start import _pass_registration_gate, _show_main_menu
             if not await _pass_registration_gate(
+                message, db, i18n, bot_config, message.from_user.id, lang
+            ):
+                return
+            from handlers.deposit_gate import _pass_deposit_gate
+            if not await _pass_deposit_gate(
                 message, db, i18n, bot_config, message.from_user.id, lang
             ):
                 return
