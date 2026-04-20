@@ -469,7 +469,16 @@ class ApiController
         $username = (!empty($userRow) && !empty($userRow[0]['username']))
             ? $userRow[0]['username'] : '';
 
-        $adminMsg = "👤 Новый пользователь зарегистрировался!\n"
+        $headline = match ($event) {
+            PostbackEvent::REG        => '👤 Новый пользователь зарегистрировался!',
+            PostbackEvent::FTD        => '💰 Первый депозит!',
+            PostbackEvent::REDEP      => '💵 Повторный депозит',
+            PostbackEvent::COMMISSION => '💼 Комиссия',
+            PostbackEvent::WITHDRAWAL => '💸 Вывод средств',
+            default                   => "📩 Постбек: {$event}",
+        };
+
+        $adminMsg = "{$headline}\n"
             . "Bot: {$botName} (ID: {$botId})\n"
             . "User: {$telegramId} (@{$username})\n"
             . "Event: {$event}";
