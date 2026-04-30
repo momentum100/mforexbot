@@ -100,6 +100,13 @@ async def _pass_deposit_gate(
     if db.has_postback_event(telegram_id, PostbackEvent.FTD):
         return True
 
+    # users.status='deposited' implies the deposit gate is satisfied — either
+    # via FTD postback (which flips status) or via password entry on a bot
+    # whose password_grants_status='deposited'. See migration 024.
+    user = db.get_user(telegram_id)
+    if user and user.get("status") == "deposited":
+        return True
+
     support_link = (bot_config.get("support_link") or "").strip() or None
     text = i18n.t("deposit.required", lang)
     kb = _build_deposit_keyboard(ref_url, support_link, i18n, lang)
@@ -131,8 +138,12 @@ def build_router() -> Router:
     ):
         user = db.get_user(callback.from_user.id)
         lang = user["lang_code"] if user else "en"
+        user_status = (user or {}).get("status")
 
-        if db.has_postback_event(callback.from_user.id, PostbackEvent.FTD):
+        if (
+            db.has_postback_event(callback.from_user.id, PostbackEvent.FTD)
+            or user_status == "deposited"
+        ):
             await callback.answer()
             # Inline import to avoid circular dependency at module load
             # (mirrors language.py pattern for _show_main_menu).

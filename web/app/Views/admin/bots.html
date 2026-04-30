@@ -103,6 +103,14 @@
                 <input type="text" name="access_password" id="bot-access-password" maxlength="64"
                        placeholder="оставьте пустым, чтобы отключить парольный гейт" style="width:100%;">
             </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Пароль выдаёт статус</label>
+                <select name="password_grants_status" id="bot-password-grants-status" style="width:100%;">
+                    <option value="deposited">Deposited (полный доступ — обходит депозитный гейт)</option>
+                    <option value="registered">Registered (депозитный гейт всё ещё действует)</option>
+                </select>
+                <div style="font-size:11px;color:#888;margin-top:2px;">Какой users.status выставляется при правильном вводе пароля.</div>
+            </div>
 
             <!--
                 Access gate toggles (migration 022). Each flag only takes effect when
@@ -265,6 +273,7 @@
         document.getElementById('bot-referral-url').value = bot.referral_url_template || '';
         document.getElementById('bot-postback-secret').value = bot.postback_secret || '';
         document.getElementById('bot-access-password').value = bot.access_password || '';
+        document.getElementById('bot-password-grants-status').value = bot.password_grants_status || 'deposited';
         document.getElementById('bot-channel-gate-enabled').checked  = !!Number(bot.channel_gate_enabled);
         document.getElementById('bot-reg-gate-enabled').checked      = !!Number(bot.reg_gate_enabled);
         document.getElementById('bot-password-gate-enabled').checked = !!Number(bot.password_gate_enabled);
@@ -288,6 +297,7 @@
         document.getElementById('bot-referral-url').value = '';
         document.getElementById('bot-postback-secret').value = '';
         document.getElementById('bot-access-password').value = '';
+        document.getElementById('bot-password-grants-status').value = 'deposited';
         document.getElementById('bot-channel-gate-enabled').checked  = false;
         document.getElementById('bot-reg-gate-enabled').checked      = false;
         document.getElementById('bot-password-gate-enabled').checked = false;

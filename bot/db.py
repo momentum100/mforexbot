@@ -145,6 +145,25 @@ class Database:
             (UserStatus.REGISTERED, self.bot_id, telegram_id, UserStatus.NEW),
         )
 
+    def set_user_status(self, telegram_id: int, status: str) -> None:
+        """Set users.status directly to the given value.
+
+        Used by the password gate to grant whichever status the bot's
+        `password_grants_status` column dictates (REGISTERED or DEPOSITED).
+        Unlike set_user_registered, this is an unconditional write — the
+        admin's `password_grants_status` choice is authoritative.
+        """
+        if status not in (UserStatus.NEW, UserStatus.REGISTERED, UserStatus.DEPOSITED):
+            raise ValueError(f"Invalid user status: {status!r}")
+        self.execute(
+            """
+            UPDATE users
+            SET status = %s, updated_at = NOW()
+            WHERE bot_id = %s AND telegram_id = %s
+            """,
+            (status, self.bot_id, telegram_id),
+        )
+
     def set_password_passed(self, telegram_id: int) -> None:
         """Flag the user as having entered bots.access_password correctly.
 

@@ -159,7 +159,11 @@ def build_router() -> Router:
 
         if submitted == expected:
             db.set_password_passed(message.from_user.id)
-            db.set_user_registered(message.from_user.id)
+            # Admin choice: password grants 'registered' (deposit gate still blocks)
+            # or 'deposited' (full access). Default 'deposited' — matches the
+            # historical behaviour expected by bots that lack a deposit gate.
+            granted_status = bot_config.get("password_grants_status") or "deposited"
+            db.set_user_status(message.from_user.id, granted_status)
             await state.clear()
 
             # Hygiene: delete the user's message so the code doesn't linger.

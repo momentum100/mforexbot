@@ -156,7 +156,14 @@ async def _pass_registration_gate(
     user = db.get_user(telegram_id)
     if user and user.get("password_passed"):
         return True
-    if has_affiliate and db.has_postback_event(telegram_id, PostbackEvent.REG):
+    user_status = (user or {}).get("status")
+    # Status reaching REGISTERED or DEPOSITED implies the reg gate is satisfied —
+    # either via affiliate postback (which sets DEPOSITED on FTD too) or via
+    # password entry (which sets whichever status `password_grants_status` dictates).
+    if has_affiliate and (
+        db.has_postback_event(telegram_id, PostbackEvent.REG)
+        or user_status in {"registered", "deposited"}
+    ):
         return True
 
     # Show the correct gate shape.
@@ -291,8 +298,12 @@ def build_router() -> Router:
     ):
         user = db.get_user(callback.from_user.id)
         lang = user["lang_code"] if user else "en"
+        user_status = (user or {}).get("status")
 
-        if db.has_postback_event(callback.from_user.id, PostbackEvent.REG):
+        if (
+            db.has_postback_event(callback.from_user.id, PostbackEvent.REG)
+            or user_status in {"registered", "deposited"}
+        ):
             await callback.answer()
             from handlers.deposit_gate import _pass_deposit_gate
             if not await _pass_deposit_gate(callback, db, i18n, bot_config, callback.from_user.id, lang):

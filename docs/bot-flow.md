@@ -139,7 +139,7 @@ Both options are offered in parallel on the same screen — the user picks which
 
 The prompt text is `register.combined_required`; the extra button label is `register.btn_enter_password`. Tapping "Ввести код доступа" enters the same FSM state described in Screen 1c (`PasswordGate.waiting_for_password`) and re-uses its cancel/mismatch/success behaviour.
 
-**Gate passes if EITHER a `reg` postback has arrived for this user OR the password was entered correctly** (`users.password_passed = 1`).
+**Gate passes if EITHER a `reg` postback has arrived for this user OR the password was entered correctly** (`users.password_passed = 1`). It also passes if `users.status` has already reached `'registered'` or `'deposited'` (e.g. set by a prior password entry on a bot whose `password_grants_status='registered'`, or by an `ftd` postback). See migration 024.
 
 **Flow:**
 1. User clicks "Register" → affiliate landing opens with click_id + site_id in URL.
@@ -183,7 +183,7 @@ The bot enters an FSM state (`PasswordGate.waiting_for_password`) and waits for 
 1. Bot shows `password.required` ("Введите код доступа:" / "Enter access code:") with a single inline `↩️ Отмена` / `↩️ Cancel` button (callback `password_cancel`).
 2. User replies with a plain text message.
 3. Bot compares `message.text.strip()` to `bots.access_password` as plaintext (direct string equality).
-   - **Match** → `UPDATE users SET password_passed = 1 WHERE id = ?` → clear FSM state → proceed to Screen 2 (Main Menu). Optionally delete the password message from chat for hygiene.
+   - **Match** → `UPDATE users SET password_passed = 1` AND `users.status = bots.password_grants_status` → clear FSM state → re-run reg gate + deposit gate (which now pass naturally because status is high enough) → proceed to Screen 2 (Main Menu). Optionally delete the password message from chat for hygiene. The `password_grants_status` column controls whether the password grants `'registered'` (deposit gate still applies) or `'deposited'` (full access — bypasses both gates). Default `'deposited'`. See migration 024.
    - **Mismatch** → show alert / ephemeral message `password.wrong` ("❌ Неверный код. Попробуйте ещё раз." / "❌ Wrong code. Try again.") → remain in FSM state (user can try again without re-issuing `/start`).
 4. If user taps `↩️ Отмена` → clear FSM state, show `password.cancelled` ("Отменено." / "Cancelled."), no main menu is shown.
 
@@ -646,6 +646,7 @@ Visible OTC pairs (partial list from screenshot):
 | referral_url_template | VARCHAR(500) NULL | Referral URL with `{user_id}` placeholder |
 | postback_secret | VARCHAR(255) NULL | Shared secret for postback authentication |
 | access_password | VARCHAR(64) NULL | If set, enables the **password gate**. Plaintext bot-wide shared code, managed via admin panel (read/edit as-is). If `referral_url_template` is also set, the gate becomes a **combined screen** (Screen 1b) offering both options in parallel. See Screen 1c. |
+| password_grants_status | ENUM('registered','deposited') NOT NULL DEFAULT 'deposited' | What `users.status` value is set when a user enters `access_password` correctly. `'deposited'` (default) = password bypasses both reg AND deposit gates; `'registered'` = deposit gate still applies after password. See migration 024 and Screen 1c. |
 | channel_gate_enabled | TINYINT(1) NOT NULL DEFAULT 0 | Per-bot toggle for Screen 1a (channel subscription check). Gate engages only if this is `1` **and** `linked_channel_id` is set. Backfilled to `1` on migration 022 when `linked_channel_id` was already set. |
 | reg_gate_enabled | TINYINT(1) NOT NULL DEFAULT 0 | Per-bot toggle for Screen 1b (registration gate). Gate engages only if this is `1` **and** `referral_url_template` is set. Backfilled to `1` on migration 022 when `referral_url_template` was already set. |
 | password_gate_enabled | TINYINT(1) NOT NULL DEFAULT 0 | Per-bot toggle for Screen 1c (password gate, or password-half of the combined Screen 1b). Gate engages only if this is `1` **and** `access_password` is set. Backfilled to `1` on migration 022 when `access_password` was already set. |
@@ -836,6 +837,7 @@ Bot edit form (`/admin/bots`) includes the following fields relevant to today's 
 | Linked channel ID | `linked_channel_id` | ID канала для подписки | Numeric Telegram chat_id for `getChatMember` |
 | Admin group ID | `admin_group_id` | ID группы — админы | Telegram chat ID; bot sends event notifications here |
 | Access password | `access_password` | Пароль доступа | Plaintext; enables password gate (Screen 1c) |
+| Password grants status | `password_grants_status` | Пароль выдаёт статус | ENUM('registered','deposited'), default 'deposited'. Controls whether a successful password entry grants `registered` (deposit gate still blocks) or `deposited` (password = full access). See migration 024. |
 | Postback secret | `postback_secret` | Postback Secret | Shared secret for postback auth |
 | Channel gate enabled | `channel_gate_enabled` | Включить гейт канала | Checkbox (TINYINT(1)). Engages Screen 1a. |
 | Registration gate enabled | `reg_gate_enabled` | Включить гейт регистрации | Checkbox (TINYINT(1)). Engages Screen 1b. |

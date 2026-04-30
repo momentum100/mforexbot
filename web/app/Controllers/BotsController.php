@@ -74,6 +74,12 @@ class BotsController extends AdminBaseController
         // Plaintext bot-wide access password (migration 015). Empty → NULL (gate disabled).
         // Per product decision: no hashing, admin reads/edits as-is.
         $accessPassword = trim($f3->get('POST.access_password') ?? '') ?: null;
+        // What status a successful password entry grants (migration 024).
+        // 'registered' → deposit gate still applies; 'deposited' → password = full access.
+        $passwordGrantsStatus = $f3->get('POST.password_grants_status');
+        if (!in_array($passwordGrantsStatus, ['registered', 'deposited'], true)) {
+            $passwordGrantsStatus = 'deposited';
+        }
         // Access-gate toggles (migration 022). Each flag only takes effect when
         // the paired field is filled in (channel id / referral url / password);
         // enabling a flag without the paired field is a silent no-op at runtime.
@@ -94,11 +100,13 @@ class BotsController extends AdminBaseController
             $db->exec(
                 'UPDATE bots SET name = ?, token = ?, webapp_url = ?, linked_channel = ?, linked_channel_id = ?,
                  admin_group_id = ?, support_link = ?, referral_url_template = ?, postback_secret = ?, access_password = ?,
+                 password_grants_status = ?,
                  channel_gate_enabled = ?, reg_gate_enabled = ?, password_gate_enabled = ?, deposit_gate_enabled = ?,
                  is_active = ?,
                  updated_at = NOW()
                  WHERE id = ?',
                 [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword,
+                 $passwordGrantsStatus,
                  $channelGateEnabled, $regGateEnabled, $passwordGateEnabled, $depositGateEnabled,
                  $isActive, $id]
             );
@@ -107,10 +115,12 @@ class BotsController extends AdminBaseController
             // Create new bot
             $db->exec(
                 'INSERT INTO bots (name, token, webapp_url, linked_channel, linked_channel_id, admin_group_id, support_link, referral_url_template, postback_secret, access_password,
+                 password_grants_status,
                  channel_gate_enabled, reg_gate_enabled, password_gate_enabled, deposit_gate_enabled,
                  is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [$name, $botToken, $webappUrl, $linkedChannel, $linkedChannelId, $adminGroupId, $supportLink, $referralUrlTemplate, $postbackSecret, $accessPassword,
+                 $passwordGrantsStatus,
                  $channelGateEnabled, $regGateEnabled, $passwordGateEnabled, $depositGateEnabled,
                  $isActive]
             );
